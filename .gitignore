@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env/
+
+# Datasets & Large Files (Patent requirement: do not upload raw pcap/csv)
+*.csv
+*.pcap
+*.npy
+*.pth
+*.pt
+*.pkl
+*.zip
+*.tar.gz
+*.7z
+*.rar
+data/
+models/
+results/
+catboost_info/
+logs/
+bin/
+obj/
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+.gemini/
+.antigravity/
+brain/
