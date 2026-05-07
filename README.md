@@ -1,6 +1,6 @@
 # NDN AI Firewall Project
 
-This repository contains the Round 16 implementation of the NDN AI Firewall, featuring behavior-based attack detection using CNN-GRU and GNN models.
+This repository contains the Round 17 implementation of the NDN AI Firewall, featuring behavior-based attack detection using CNN-GRU and GNN models.
 
 ## Project Structure
 - `tier2/refine_dataset.py`: Cleans and prepares the dataset into sequences.
@@ -33,7 +33,7 @@ Train the CNN-GRU model from scratch:
 ```bash
 python3 tier2/train_cnn_gru_v4.py
 ```
-This saves the model to `models/tier2_cnn_gru_v1_r16.pth`.
+This saves the model to `models/tier2_cnn_gru_v1_r17.pth`.
 
 ### 4. GNN Topology
 Run the GNN prototype to verify topological detection:
@@ -41,7 +41,7 @@ Run the GNN prototype to verify topological detection:
 python3 tier2/train_gnn_v1.py
 ```
 
-## Round 16 Metrics
-- **Macro F1 Score**: 0.99
+## Round 17 Metrics
+- **Test Macro F1 Score**: 0.984 (Across 5 Classes)
 - **Confidence Thresholds**: 0.3 for all classes
 - **Entropy Baseline**: 0.68 (The model significantly outperforms simple heuristics)

@@ -1,0 +1,49 @@
+version: '3.8'
+
+networks:
+  attack_lab_net:
+    external: true
+
+services:
+
+  victim:
+    image: ubuntu:22.04
+    container_name: victim
+    hostname: victim
+    networks:
+      attack_lab_net:
+        ipv4_address: 10.10.0.10
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "8080:80"
+      - "2222:22"
+    volumes:
+      - ~/attack_captures:/captures
+    command: >
+      bash -c "
+        apt-get update -qq &&
+        apt-get install -y -qq openssh-server apache2 net-tools &&
+        echo 'root:password123' | chpasswd &&
+        sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config &&
+        sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config &&
+        service ssh start &&
+        service apache2 start &&
+        echo 'Victim ready at 10.10.0.10' &&
+        tail -f /dev/null
+      "
+
+  monitor:
+    image: ubuntu:22.04
+    container_name: monitor
+    hostname: monitor
+    networks:
+      attack_lab_net:
+        ipv4_address: 10.10.0.20
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ~/attack_captures:/captures
+      - ~/attack_lab/scripts:/scripts
+    command: tail -f /dev/null
