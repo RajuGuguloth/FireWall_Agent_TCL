@@ -1,226 +1,293 @@
+"""
+NDN AI Firewall API — R18 production cascade.
+
+All inference logic lives in cascade_r18.py (shared with offline eval).
+"""
 import os
+import sys
 import time
 import json
+import threading
+from typing import List, Dict, Any, Optional
+
 import joblib
 import numpy as np
 import onnxruntime as ort
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import List
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, field_validator
 
-# ─── MODELS & CONSTANTS ──────────────────────────────────────────────────────
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RF_MODEL_PATH = os.path.join(BASE_DIR, "models", "tier1_rf_v4.pkl")
-ONNX_MODEL_PATH = os.path.join(BASE_DIR, "models", "onnx", "tier2_cnn_gru_r17.onnx")
-TEMP_PATH = os.path.join(BASE_DIR, "models", "tier2_r17_temperature.json")
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
-# Load Temperature
-try:
-    with open(TEMP_PATH, "r") as f:
-        config = json.load(f)
-        TEMPERATURE = config.get("temperature", 1.0)
-except Exception:
-    TEMPERATURE = 1.0
+import config as cfg
+from src.inference.cascade_r18 import CascadeRuntime
+from api.alert_store import init_db, log_alert, fetch_alerts, alert_counts, DB_PATH
 
-# Load ONNX Session
-try:
-    ort_session = ort.InferenceSession(ONNX_MODEL_PATH)
-    onnx_input_name = ort_session.get_inputs()[0].name
-except Exception as e:
-    print(f"Failed to load ONNX: {e}")
-    ort_session = None
-
-# Load Tier 1 RF
-try:
-    rf_model = joblib.load(RF_MODEL_PATH)
-except Exception as e:
-    print(f"Failed to load RF: {e}")
-    rf_model = None
-
-CLASSES = ["BRUTE_FORCE", "DDOS_HTTP_FLOOD", "SLOW_HTTP", "PORT_SCAN", "DNS_TUNNELING"]
 APP_START_TIME = time.time()
+_STATS_LOCK = threading.Lock()
 
-# ─── IN-MEMORY STATS ─────────────────────────────────────────────────────────
-stats = {
-    "total_packets_inspected": 0,  # We'll count sequences
+
+def _require(path: str, label: str) -> None:
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Missing {label}: {path}")
+
+
+def _validate_contract() -> None:
+    for p, lbl in [
+        (cfg.SCALER_PATH, "v6 scaler"),
+        (cfg.ENCODER_PATH, "v6 encoder"),
+        (cfg.TIER1_GATE, "Tier-1 gate"),
+        (cfg.TIER2_ONNX, "Tier-2 ONNX"),
+        (cfg.TIER2_TEMP, "Tier-2 temperature"),
+    ]:
+        _require(p, lbl)
+    scaler = joblib.load(cfg.SCALER_PATH)
+    if getattr(scaler, "n_features_in_", None) != cfg.N_FEATURES:
+        raise ValueError(f"Scaler feature count != {cfg.N_FEATURES}")
+    encoder = joblib.load(cfg.ENCODER_PATH)
+    n_cls = len(encoder.classes_)
+    logits_dim = ort.InferenceSession(cfg.TIER2_ONNX).get_outputs()[0].shape[-1]
+    if logits_dim != n_cls:
+        raise ValueError(f"ONNX classes {logits_dim} != encoder {n_cls}")
+
+
+_validate_contract()
+RT = CascadeRuntime.load()
+init_db()
+ATTACK_CLASSES = [c for c in RT.classes if c != "BENIGN"]
+
+stats: Dict[str, Any] = {
+    "total_sequences": 0,
+    "tier1_fast_allowed": 0,
+    "tier2_escalated": 0,
+    "tier3_checked": 0,
     "total_blocked": 0,
     "total_flagged": 0,
     "total_allowed": 0,
-    "attacks_detected": {c: 0 for c in CLASSES}
+    "latency_sum_ms": 0.0,
+    "attacks_detected": {c: 0 for c in ATTACK_CLASSES},
 }
 
-app = FastAPI(title="NDN AI Firewall API")
+app = FastAPI(title="NDN AI Firewall API", version="r18")
 
-# ─── REQUEST SCHEMAS ─────────────────────────────────────────────────────────
+_DASHBOARD = os.path.join(os.path.dirname(__file__), "static", "dashboard.html")
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+
 class PredictRequest(BaseModel):
-    sequence: List[List[float]]
+    sequence: List[List[float]] = Field(..., min_length=cfg.WINDOW_SIZE, max_length=cfg.WINDOW_SIZE)
+
+    @field_validator("sequence")
+    @classmethod
+    def validate_packets(cls, seq: List[List[float]]) -> List[List[float]]:
+        for i, pkt in enumerate(seq):
+            if len(pkt) != cfg.N_FEATURES:
+                raise ValueError(
+                    f"Packet {i} must have {cfg.N_FEATURES} features, got {len(pkt)}"
+                )
+            if not all(np.isfinite(pkt)):
+                raise ValueError(f"Packet {i} contains non-finite values")
+        return seq
+
 
 class BatchPredictRequest(BaseModel):
-    sequences: List[List[List[float]]]
+    sequences: List[List[List[float]]] = Field(..., min_length=1, max_length=500)
 
-# ─── HELPER FUNCTIONS ────────────────────────────────────────────────────────
-def process_single_sequence(seq_list: List[List[float]]):
-    """Returns single prediction dictionary."""
-    if len(seq_list) != 20:
-        raise ValueError(f"Sequence length must be exactly 20, got {len(seq_list)}")
-    if any(len(pkt) != 17 for pkt in seq_list):
-        raise ValueError("Each packet in sequence must have exactly 17 features")
 
-    # 1. Tier-1 Fast Path Check
-    packet_1 = np.array(seq_list[0]).reshape(1, -1)
-    
-    # We attempt RF inference. If RF model is invalid or missing, we skip to Tier 2.
-    if rf_model is not None and hasattr(rf_model, "predict_proba"):
-        try:
-            # Assuming RF output is multiclass with "BENIGN" or binary 0=BENIGN
-            rf_probs = rf_model.predict_proba(packet_1)[0]
-            # Assumes index 0 or 'BENIGN' class mapping. Let's do a generic check:
-            # If Benign is class 0 in the RF model
-            benign_idx = 0 
-            if hasattr(rf_model, "classes_"):
-                if "BENIGN" in rf_model.classes_:
-                    benign_idx = list(rf_model.classes_).index("BENIGN")
-                elif "Normal" in rf_model.classes_:
-                    benign_idx = list(rf_model.classes_).index("Normal")
-                    
-            if rf_probs[benign_idx] > 0.95:
-                # Fast Path exit
-                return {
-                    "label": "BENIGN",
-                    "class_id": -1,
-                    "confidence": float(rf_probs[benign_idx]),
-                    "tier_used": "tier1_rf",
-                    "probabilities": {"BENIGN": float(rf_probs[benign_idx])},
-                    "action": "ALLOW"
-                }
-        except Exception as e:
-            pass # ignore RF errors and fallback to T2
+@app.get("/")
+def dashboard():
+    return FileResponse(_DASHBOARD)
 
-    if ort_session is None:
-        raise RuntimeError("ONNX session not initialized")
 
-    # 2. Tier-2 Deep Inspection
-    seq_np = np.array(seq_list, dtype=np.float32).reshape(1, 20, 17)
-    logits = ort_session.run(None, {onnx_input_name: seq_np})[0][0] # shape (5,)
-    
-    # Apply Temperature Scaling and Softmax
-    scaled_logits = logits / TEMPERATURE
-    exp_logits = np.exp(scaled_logits - np.max(scaled_logits)) # numeric stability
-    probs = exp_logits / exp_logits.sum()
-    
-    class_id = int(np.argmax(probs))
-    confidence = float(probs[class_id])
-    label = CLASSES[class_id]
+@app.get("/dashboard")
+def dashboard_alias():
+    return FileResponse(_DASHBOARD)
 
-    action = "ALLOW"
-    if confidence > 0.95:
-        action = "BLOCK"
-    elif confidence >= 0.80:
-        action = "FLAG"
 
-    return {
-        "label": label,
-        "class_id": class_id,
-        "confidence": confidence,
-        "tier_used": "tier2_cnn_gru",
-        "probabilities": {CLASSES[i]: float(probs[i]) for i in range(5)},
-        "action": action
-    }
+def process_single_sequence(raw_seq: List[List[float]]) -> Dict[str, Any]:
+    return RT.classify_raw(raw_seq)
 
-# ─── API ENDPOINTS ───────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health_check():
     return {
         "status": "ok",
-        "model": "tier2_cnn_gru_r17",
-        "classes": 5,
-        "architecture": "Conv1D(17→64) → GRU(64→128,2L) → Linear(128→5)",
-        "test_f1": 0.9840,
-        "round": 17
+        "round": 18,
+        "classes": RT.classes,
+        "features": cfg.N_FEATURES,
+        "window": cfg.WINDOW_SIZE,
+        "scaler": os.path.basename(cfg.SCALER_PATH),
+        "tier3_enabled": RT.t3 is not None,
+        "alerts_db": DB_PATH,
+        "temperature": RT.temperature,
+        "thresholds": {
+            "gate_benign": cfg.GATE_THRESHOLD,
+            "block": cfg.BLOCK_THRESHOLD,
+            "flag": cfg.FLAG_THRESHOLD,
+        },
     }
 
 
 @app.post("/predict")
 def predict(req: PredictRequest):
     try:
-        start_time = time.perf_counter()
-        
+        t0 = time.perf_counter()
         result = process_single_sequence(req.sequence)
-        
-        # Update Stats
-        stats["total_packets_inspected"] += 1
-        if result["action"] == "BLOCK":
-            stats["total_blocked"] += 1
-            if result["label"] in stats["attacks_detected"]:
-                stats["attacks_detected"][result["label"]] += 1
-        elif result["action"] == "FLAG":
-            stats["total_flagged"] += 1
-        else:
-            stats["total_allowed"] += 1
-            
+        result["latency_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+        result["alert_id"] = log_alert(result)
+        _update_stats(result)
         return result
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/predict/batch")
 def predict_batch(req: BatchPredictRequest):
-    start_time = time.perf_counter()
-    results = []
-    
-    blk, flg, alw = 0, 0, 0
-    
-    for seq in req.sequences:
-        try:
+    batch_t0 = time.perf_counter()
+    results, blk, flg, alw = [], 0, 0, 0
+    try:
+        for seq in req.sequences:
+            item_t0 = time.perf_counter()
             res = process_single_sequence(seq)
+            res["latency_ms"] = round((time.perf_counter() - item_t0) * 1000, 2)
+            res["alert_id"] = log_alert(res)
             results.append({
+                "alert_id": res["alert_id"],
                 "label": res["label"],
                 "confidence": res["confidence"],
-                "action": res["action"]
+                "action": res["action"],
+                "tiers_used": res["tiers_used"],
+                "latency_ms": res["latency_ms"],
             })
-            
-            # Update batch local counts
-            if res["action"] == "BLOCK": blk += 1
-            elif res["action"] == "FLAG": flg += 1
-            else: alw += 1
-            
-            # Update global stats
-            stats["total_packets_inspected"] += 1
-            if res["action"] == "BLOCK":
-                stats["total_blocked"] += 1
-                if res["label"] in stats["attacks_detected"]:
-                    stats["attacks_detected"][res["label"]] += 1
-            elif res["action"] == "FLAG":
-                stats["total_flagged"] += 1
-            else:
-                stats["total_allowed"] += 1
-                
-        except ValueError as ve:
-            raise HTTPException(status_code=400, detail=str(ve))
-            
-    latency_ms = (time.perf_counter() - start_time) * 1000
+            blk += res["action"] == "BLOCK"
+            flg += res["action"] == "FLAG"
+            alw += res["action"] == "ALLOW"
+            _update_stats(res)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+
+    per_item = [r["latency_ms"] for r in results]
     return {
         "results": results,
         "total": len(req.sequences),
         "blocked": blk,
         "flagged": flg,
         "allowed": alw,
-        "latency_ms": round(latency_ms, 2)
+        "latency_ms": round((time.perf_counter() - batch_t0) * 1000, 2),
+        "avg_latency_ms": round(sum(per_item) / len(per_item), 2) if per_item else 0.0,
     }
+
+
+def _update_stats(res: Dict[str, Any]) -> None:
+    with _STATS_LOCK:
+        stats["total_sequences"] += 1
+        if res.get("latency_ms") is not None:
+            stats["latency_sum_ms"] += float(res["latency_ms"])
+        tiers = res.get("tiers_used", [])
+        if tiers == ["tier1_gate"]:
+            stats["tier1_fast_allowed"] += 1
+        if "tier1_gate_escalate" in tiers:
+            stats["tier2_escalated"] += 1
+        if "tier3_oneclass" in tiers:
+            stats["tier3_checked"] += 1
+        act = res["action"]
+        if act == "BLOCK":
+            stats["total_blocked"] += 1
+            if res["label"] in stats["attacks_detected"]:
+                stats["attacks_detected"][res["label"]] += 1
+        elif act == "FLAG":
+            stats["total_flagged"] += 1
+        else:
+            stats["total_allowed"] += 1
 
 
 @app.get("/stats")
 def get_stats():
-    total = stats["total_packets_inspected"]
-    blk = stats["total_blocked"]
-    rate = (blk / total * 100) if total > 0 else 0.0
-    
+    with _STATS_LOCK:
+        snap = dict(stats)
+        latency_sum = stats["latency_sum_ms"]
+        n = stats["total_sequences"]
+    persisted = alert_counts()
     return {
-        **stats,
-        "block_rate_percent": round(rate, 2),
-        "avg_latency_ms": 0.0, # Handled dynamically by load balancer or metrics, here we return 0.0 or we can track it
-        "uptime_seconds": int(time.time() - APP_START_TIME)
+        **snap,
+        "avg_latency_ms": round(latency_sum / n, 2) if n else 0.0,
+        "block_rate_percent": round(snap["total_blocked"] / n * 100, 2) if n else 0.0,
+        "persisted_alerts": persisted,
+        "persisted_total": sum(persisted.values()),
+        "alerts_db": DB_PATH,
+        "uptime_seconds": int(time.time() - APP_START_TIME),
     }
+
+
+@app.post("/demo/traffic")
+def demo_traffic(n: int = Query(15, ge=1, le=40)):
+    seq_path = os.path.join(cfg.SEQ_DIR, "X_test.npy")
+    if not os.path.isfile(seq_path):
+        raise HTTPException(status_code=404, detail="v6 test sequences not found")
+    Xte = np.load(seq_path)
+    sc = RT.scaler
+    idx = np.random.choice(len(Xte), size=min(n, len(Xte)), replace=False)
+    results = []
+    for i in idx:
+        raw = sc.inverse_transform(Xte[i].reshape(-1, cfg.N_FEATURES))
+        raw = raw.reshape(cfg.WINDOW_SIZE, cfg.N_FEATURES).tolist()
+        t0 = time.perf_counter()
+        res = process_single_sequence(raw)
+        res["latency_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+        res["alert_id"] = log_alert(res)
+        _update_stats(res)
+        results.append({
+            "alert_id": res["alert_id"],
+            "label": res["label"],
+            "action": res["action"],
+            "confidence": res["confidence"],
+            "tiers_used": res["tiers_used"],
+            "tier_trace": res.get("tier_trace"),
+            "latency_ms": res["latency_ms"],
+        })
+    return {"fired": len(results), "results": results}
+
+
+@app.get("/metrics/tiers")
+def get_tier_metrics(refresh: bool = Query(False, description="Recompute from v6 test set")):
+    try:
+        from api.tier_metrics import compute_tier_metrics
+        return compute_tier_metrics(force=refresh)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/alerts")
+def get_alerts(
+    limit: int = Query(50, ge=1, le=500),
+    action: Optional[str] = Query(None, description="Filter: ALLOW, FLAG, or BLOCK"),
+):
+    if action and action.upper() not in ("ALLOW", "FLAG", "BLOCK"):
+        raise HTTPException(status_code=400, detail="action must be ALLOW, FLAG, or BLOCK")
+    return {
+        "total_returned": min(limit, 500),
+        "alerts": fetch_alerts(limit=limit, action=action),
+    }
+
+
+@app.on_event("startup")
+def _seed_demo_alerts_if_empty() -> None:
+    if sum(alert_counts().values()) > 0:
+        return
+    seq_path = os.path.join(cfg.SEQ_DIR, "X_test.npy")
+    if not os.path.isfile(seq_path):
+        return
+    Xte = np.load(seq_path)
+    sc = RT.scaler
+    n = min(30, len(Xte))
+    for i in np.linspace(0, len(Xte) - 1, n, dtype=int):
+        raw = sc.inverse_transform(Xte[i].reshape(-1, cfg.N_FEATURES))
+        raw = raw.reshape(cfg.WINDOW_SIZE, cfg.N_FEATURES).tolist()
+        res = process_single_sequence(raw)
+        log_alert(res)
+        _update_stats(res)

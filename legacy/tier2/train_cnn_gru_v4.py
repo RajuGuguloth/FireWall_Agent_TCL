@@ -1,4 +1,7 @@
 """
+LEGACY R17 — DO NOT USE FOR PRODUCTION (5-class, val=test leakage).
+See legacy/README.md and CODEBASE.md for the R18 path.
+
 Tier-2 CNN-GRU v5 — Round 17
   Features:     17
   Window:       20
@@ -120,7 +123,7 @@ def train():
     best_f1       = 0.0
     best_epoch    = 0
     no_improve    = 0
-    epochs        = 0
+    epochs        = 50
     patience      = 10
     
     prev_train_loss = 999.0

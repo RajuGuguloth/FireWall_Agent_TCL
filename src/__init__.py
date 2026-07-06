@@ -1,0 +1,1 @@
+"""Hybrid-Sentinel R18 — core Python package."""

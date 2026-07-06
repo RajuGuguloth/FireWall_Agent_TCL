@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>Hybrid-Sentinel SOC Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1117; --card: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e;
+      --green: #3fb950; --red: #f85149; --amber: #d29922; --blue: #58a6ff; --purple: #bc8cff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+    header {
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;
+      padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); background: var(--card);
+    }
+    header h1 { font-size: 1.15rem; font-weight: 600; }
+    header h1 span { color: var(--blue); }
+    .status { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--muted); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 50% { opacity: 0.5; } }
+    nav.tabs {
+      display: flex; gap: 0.25rem; padding: 0.75rem 1.5rem 0; border-bottom: 1px solid var(--border);
+      background: var(--card);
+    }
+    nav.tabs button {
+      background: none; border: none; color: var(--muted); padding: 0.5rem 1rem; cursor: pointer;
+      border-bottom: 2px solid transparent; font-size: 0.85rem; margin-bottom: -1px;
+    }
+    nav.tabs button.active { color: var(--text); border-bottom-color: var(--blue); }
+    nav.tabs button:hover { color: var(--text); }
+    main { padding: 1.25rem 1.5rem; max-width: 1400px; margin: 0 auto; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
+    .grid-3 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem;
+    }
+    .card label, .card .sub { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .card .val { font-size: 1.6rem; font-weight: 700; margin-top: 0.25rem; }
+    .card.allow .val { color: var(--green); }
+    .card.block .val { color: var(--red); }
+    .card.flag .val { color: var(--amber); }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem; }
+    @media (max-width: 900px) { .row { grid-template-columns: 1fr; } }
+    h2 { font-size: 0.9rem; color: var(--muted); margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    h3 { font-size: 0.95rem; margin-bottom: 0.5rem; color: var(--blue); }
+    .bar-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; font-size: 0.85rem; }
+    .bar-label { width: 140px; color: var(--muted); flex-shrink: 0; }
+    .bar-track { flex: 1; height: 8px; background: #21262d; border-radius: 4px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    th, td { text-align: left; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th.latency, td.latency { color: var(--blue); font-weight: 600; white-space: nowrap; }
+    th { color: var(--muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; }
+    tr:hover td { background: #1c2128; }
+    tr.trace-row td { background: #0d1117; padding: 0.75rem 1rem; font-size: 0.8rem; }
+    .badge {
+      display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px;
+      font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    }
+    .badge.ALLOW { background: rgba(63,185,80,0.15); color: var(--green); }
+    .badge.BLOCK { background: rgba(248,81,73,0.15); color: var(--red); }
+    .badge.FLAG { background: rgba(210,153,34,0.15); color: var(--amber); }
+    .tiers { color: var(--muted); font-size: 0.75rem; }
+    .empty { text-align: center; padding: 2rem; color: var(--muted); }
+    footer { text-align: center; padding: 1rem; color: var(--muted); font-size: 0.75rem; }
+    .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; margin: 0.75rem 0; }
+    .metric-grid .m { text-align: center; padding: 0.5rem; background: #0d1117; border-radius: 6px; }
+    .metric-grid .m .n { font-size: 1.1rem; font-weight: 700; }
+    .metric-grid .m .l { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; }
+    .tier-card { border-left: 3px solid var(--blue); }
+    .tier-card.t1 { border-left-color: var(--green); }
+    .tier-card.t2 { border-left-color: var(--blue); }
+    .tier-card.t3 { border-left-color: var(--purple); }
+    .funnel { display: flex; flex-direction: column; gap: 0.5rem; }
+    .funnel-step {
+      display: flex; align-items: center; gap: 1rem; padding: 0.6rem 0.75rem;
+      background: #0d1117; border-radius: 6px; font-size: 0.85rem;
+    }
+    .funnel-step .arrow { color: var(--muted); }
+    .pill { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 4px; background: #21262d; font-size: 0.7rem; margin: 0.1rem; }
+    .trace-step { margin-bottom: 0.5rem; padding: 0.5rem; border-left: 2px solid var(--border); padding-left: 0.75rem; }
+    .trace-step strong { color: var(--blue); }
+    .note { font-size: 0.8rem; color: var(--muted); margin-bottom: 1rem; padding: 0.5rem 0.75rem; background: #21262d; border-radius: 6px; }
+    .code-list { list-style: none; font-size: 0.85rem; }
+    .code-list li { padding: 0.35rem 0; border-bottom: 1px solid var(--border); font-family: ui-monospace, monospace; color: var(--blue); }
+    .expand-btn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 4px; padding: 0.1rem 0.4rem; cursor: pointer; font-size: 0.7rem; }
+    .expand-btn:hover { color: var(--text); border-color: var(--blue); }
+    .class-table { font-size: 0.8rem; margin-top: 0.5rem; }
+    .class-table td, .class-table th { padding: 0.35rem 0.5rem; }
+    .flow-layout { display: grid; grid-template-columns: 1fr 260px; gap: 1rem; }
+    @media (max-width: 900px) { .flow-layout { grid-template-columns: 1fr; } }
+    #flowCanvas { width: 100%; height: 420px; border-radius: 8px; overflow: hidden; background: #0d1117; }
+    .flow-side { display: flex; flex-direction: column; gap: 0.75rem; }
+    .flow-item {
+      display: grid; grid-template-columns: 10px 1fr auto auto; gap: 0.5rem; align-items: center;
+      font-size: 0.78rem; padding: 0.35rem 0; border-bottom: 1px solid var(--border);
+    }
+    .flow-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .flow-label { color: var(--text); }
+    .flow-conf { color: var(--muted); font-size: 0.7rem; }
+    .flow-lat { color: var(--blue); font-size: 0.7rem; font-weight: 600; margin-left: auto; }
+    .legend-item { font-size: 0.75rem; padding: 0.2rem 0; display: flex; align-items: center; gap: 0.4rem; }
+    .demo-btn {
+      background: var(--blue); color: #fff; border: none; border-radius: 6px;
+      padding: 0.45rem 0.9rem; font-size: 0.8rem; cursor: pointer; margin-left: 0.5rem;
+    }
+    .demo-btn:hover { opacity: 0.9; }
+    .demo-btn:disabled { opacity: 0.5; cursor: wait; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>Hybrid-Sentinel</span> SOC Dashboard · R18</h1>
+    <div class="status">
+      <span class="dot" id="liveDot"></span>
+      <span id="statusText">Connecting…</span>
+      <span>· refresh <span id="refreshSec">5</span>s</span>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="active" data-tab="live">Live session</button>
+    <button data-tab="quality">Model quality (per tier)</button>
+    <button data-tab="research">Research & code</button>
+    <button data-tab="flow3d">3D attack flow</button>
+    <button data-tab="alerts">Alert audit trail</button>
+  </nav>
+
+  <main>
+    <!-- LIVE SESSION -->
+    <section class="panel active" id="panel-live">
+      <div class="note" id="sessionNote">Live counters update as traffic hits <code>POST /predict</code>. These are runtime verdicts — not accuracy (no ground truth at inference).</div>
+      <div class="grid" id="kpis"></div>
+      <div class="row">
+        <div class="card">
+          <h2>Cascade funnel (this session)</h2>
+          <div class="funnel" id="funnel"></div>
+        </div>
+        <div class="card">
+          <h2>Attacks blocked by type</h2>
+          <div id="attackBars"></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:1rem">
+        <h2>Recent predictions <span style="font-weight:400;text-transform:none;color:var(--muted)">— includes latency per request</span></h2>
+        <div class="table-scroll" id="liveAlertsWrap"></div>
+      </div>
+    </section>
+
+    <!-- MODEL QUALITY -->
+    <section class="panel" id="panel-quality">
+      <div class="note" id="qualityNote">Loading offline validation metrics from v6 held-out TEST set…</div>
+      <div class="grid grid-3" id="tierMetricCards"></div>
+      <div class="card" style="margin-top:1rem">
+        <h2>Cascade packet flow (test set — counts &amp; % at each stage)</h2>
+        <div class="note" id="cascadeFlowNote" style="margin-bottom:0.75rem"></div>
+        <div id="cascadeFlowTable"></div>
+      </div>
+      <div class="card" style="margin-top:1rem">
+        <h2>Tier-2 per-class breakdown (test set)</h2>
+        <div id="perClassTable"></div>
+      </div>
+    </section>
+
+    <!-- RESEARCH -->
+    <section class="panel" id="panel-research">
+      <div class="row">
+        <div class="card">
+          <h2>Pipeline architecture</h2>
+          <pre style="font-size:0.75rem;color:var(--muted);line-height:1.5;overflow:auto">
+NDN packet window (20×17 features)
+        │
+        ▼
+┌───────────────────┐
+│ Tier-1 Gate       │  RandomForest · P(BENIGN) ≥ 0.90 → ALLOW (fast)
+│ tier1_gate_v6.pkl │
+└─────────┬─────────┘
+          │ escalate
+          ▼
+┌───────────────────┐
+│ Tier-2 CNN-GRU    │  6-class ONNX · conf thresholds → BLOCK/FLAG/ALLOW
+│ r18 + temperature │
+└─────────┬─────────┘
+          │ low-conf attack leak
+          ▼
+┌───────────────────┐
+│ Tier-3 One-class  │  Mahalanobis on embeddings → zero-day FLAG
+│ tier3_oneclass    │
+└───────────────────┘
+          </pre>
+        </div>
+        <div class="card">
+          <h2>Why this is unique (thesis angle)</h2>
+          <ul id="uniquePoints" style="font-size:0.85rem;line-height:1.6;padding-left:1.2rem;color:var(--muted)"></ul>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Reproduce from code</h2>
+        <ul class="code-list" id="scriptList"></ul>
+        <p style="margin-top:0.75rem;font-size:0.8rem;color:var(--muted)">
+          API: <span class="pill">GET /metrics/tiers</span>
+          <span class="pill">GET /stats</span>
+          <span class="pill">POST /predict</span>
+          — each prediction returns <code>tier_trace</code> and <code>latency_ms</code> (inference time).
+        </p>
+      </div>
+    </section>
+
+    <!-- 3D ATTACK FLOW -->
+    <section class="panel" id="panel-flow3d">
+      <div class="note">
+        Real packets animate <strong>Internet → Tier-1 → Tier-2 → Tier-3 → ALLOW / FLAG / BLOCK</strong>.
+        Color = attack type. Built with <strong>Three.js</strong> (3D graphics).
+        <button class="demo-btn" id="demoTrafficBtn">Run demo traffic</button>
+      </div>
+      <div class="flow-layout">
+        <div class="card" style="padding:0;overflow:hidden">
+          <div id="flowCanvas"></div>
+        </div>
+        <div class="flow-side">
+          <div class="card">
+            <h2>Attack types (color)</h2>
+            <div id="attackLegend"></div>
+          </div>
+          <div class="card" style="flex:1;overflow:auto;max-height:320px">
+            <h2>Live feed</h2>
+            <div id="flowFeed"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:1rem">
+        <h2>Why not playhtml?</h2>
+        <p style="font-size:0.85rem;color:var(--muted);line-height:1.6">
+          <a href="https://playhtml.fun" style="color:var(--blue)">playhtml</a> is open-source for
+          <em>collaborative interactive HTML</em> (shared toggles, cursors, communal pages) — not 3D network graphics.
+          For attack-flow visualization we use Three.js. playhtml could be added later if multiple thesis reviewers
+          watch the same live session together.
+        </p>
+      </div>
+    </section>
+
+    <!-- ALERTS -->
+    <section class="panel" id="panel-alerts">
+      <div class="card">
+        <h2>Recent alerts <span style="font-weight:400;text-transform:none" id="alertsSubtitle">(SQLite audit trail — all-time)</span></h2>
+        <div class="note" style="margin-bottom:0.75rem">Scroll horizontally if needed — <strong>Latency</strong> is inference time in milliseconds.</div>
+        <div class="table-scroll" id="alertsWrap"></div>
+      </div>
+    </section>
+  </main>
+  <footer>NDN AI Firewall · validation metrics = offline test · live panel = runtime counters</footer>
+
+  <script>
+    const REFRESH_MS = 5000;
+    let tierMetrics = null;
+    let expandedAlertId = null;
+
+    document.querySelectorAll("nav.tabs button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("nav.tabs button").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+        btn.classList.add("active");
+        document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
+        if (btn.dataset.tab === "flow3d" && window._initFlowTab) window._initFlowTab();
+      });
+    });
+
+    function pct(v) { return v == null ? "—" : (v * 100).toFixed(1) + "%"; }
+    function num(v, d = 2) { return v == null ? "—" : Number(v).toFixed(d); }
+
+    function bar(label, value, max, color) {
+      const pctV = max > 0 ? Math.round((value / max) * 100) : 0;
+      return `<div class="bar-row">
+        <div class="bar-label">${label}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pctV}%;background:${color}"></div></div>
+        <div style="width:48px;text-align:right">${value}</div>
+      </div>`;
+    }
+
+    function kpi(label, value, cls = "") {
+      return `<div class="card ${cls}"><label>${label}</label><div class="val">${value}</div></div>`;
+    }
+
+    function metricBox(label, val) {
+      return `<div class="m"><div class="n">${val}</div><div class="l">${label}</div></div>`;
+    }
+
+    function renderCascadeFlow(cf) {
+      if (!cf) return;
+      const note = document.getElementById("cascadeFlowNote");
+      const kr = cf.key_rates || {};
+      if (note) {
+        note.innerHTML =
+          `<strong>${cf.input_total?.toLocaleString()}</strong> test packets ` +
+          `(${cf.benign_total?.toLocaleString()} benign, ${cf.attack_total?.toLocaleString()} attack). ` +
+          `Tier-2 sees <strong>${kr.tier2_workload_pct}%</strong> · ` +
+          `Tier-3 screens <strong>${kr.tier3_workload_pct}%</strong> (all ALLOW candidates). ` +
+          `Attack detection <strong>${kr.attack_detection_percent}%</strong> · ` +
+          `Benign FPR <strong>${kr.benign_fpr_percent}%</strong>.<br>` +
+          `<span style="margin-top:0.35rem;display:block">${cf.zero_day_path || ""}</span>` +
+          `<span style="margin-top:0.35rem;display:block;color:var(--amber)">${cf.api_note || ""}</span>`;
+      }
+      const rows = (cf.stages || []).map(s => `<tr>
+        <td>${s.name.replace(/_/g, " ")}</td>
+        <td><strong>${s.total?.toLocaleString()}</strong></td>
+        <td>${s.pct_of_input}%</td>
+        <td>${s.benign?.toLocaleString()}</td>
+        <td>${s.attack?.toLocaleString()}</td>
+      </tr>`).join("");
+      const el = document.getElementById("cascadeFlowTable");
+      if (el) el.innerHTML = rows ? `
+        <table class="class-table"><thead><tr>
+          <th>Stage</th><th>Packets</th><th>% of input</th><th>Benign</th><th>Attack</th>
+        </tr></thead><tbody>${rows}</tbody></table>` : "";
+    }
+
+    function renderTierMetrics(m) {
+      if (!m) return;
+      document.getElementById("qualityNote").textContent =
+        `Offline validation on ${m.test_sequences?.toLocaleString()} held-out sequences · ${m.split || ""} · computed in ${m.compute_seconds}s · ${m.generated_at || ""}`;
+
+      const t1 = m.tier1_gate || {};
+      const t2 = m.tier2_cnn_gru || {};
+      const t3 = m.tier3_oneclass || {};
+
+      document.getElementById("tierMetricCards").innerHTML = `
+        <div class="card tier-card t1">
+          <h3>Tier-1 Gate</h3>
+          <div class="sub">${t1.role || ""}</div>
+          <div class="metric-grid">
+            ${metricBox("Accuracy", pct(t1.accuracy))}
+            ${metricBox("Precision", pct(t1.precision))}
+            ${metricBox("Recall", pct(t1.recall))}
+            ${metricBox("F1", pct(t1.f1))}
+          </div>
+          <p style="font-size:0.8rem;color:var(--muted);margin-top:0.5rem">
+            Benign FPR: <strong style="color:var(--green)">${t1.benign_fpr_percent ?? "—"}%</strong> ·
+            Attack recall: <strong>${t1.attack_recall_percent ?? "—"}%</strong> ·
+            threshold P(BENIGN)≥${t1.threshold ?? "—"}
+          </p>
+        </div>
+        <div class="card tier-card t2">
+          <h3>Tier-2 CNN-GRU</h3>
+          <div class="sub">${t2.role || ""} · macro avg</div>
+          <div class="metric-grid">
+            ${metricBox("Accuracy", pct(t2.accuracy))}
+            ${metricBox("Precision", pct(t2.precision_macro))}
+            ${metricBox("Recall", pct(t2.recall_macro))}
+            ${metricBox("F1", pct(t2.f1_macro))}
+          </div>
+          <p style="font-size:0.8rem;color:var(--muted);margin-top:0.5rem">
+            6 classes incl. BENIGN · temperature ${t2.temperature ?? "—"}
+          </p>
+        </div>
+        <div class="card tier-card t3">
+          <h3>Tier-3 One-class</h3>
+          <div class="sub">${t3.role || "disabled"}</div>
+          ${t3.enabled ? `
+          <div class="metric-grid">
+            ${metricBox("ROC-AUC", num(t3.roc_auc))}
+            ${metricBox("Det. rate", (t3.detection_rate_percent ?? "—") + "%")}
+            ${metricBox("False alarm", (t3.false_alarm_percent ?? "—") + "%")}
+            ${metricBox("Threshold", num(t3.threshold, 1))}
+          </div>` : `<p class="empty" style="padding:1rem">Tier-3 not loaded</p>`}
+        </div>`;
+
+      const pc = t2.per_class || {};
+      const rows = Object.entries(pc).map(([cls, v]) =>
+        `<tr><td>${cls}</td><td>${pct(v.precision)}</td><td>${pct(v.recall)}</td><td>${pct(v.f1)}</td><td>${v.support}</td></tr>`
+      ).join("");
+      document.getElementById("perClassTable").innerHTML = rows ? `
+        <table class="class-table"><thead><tr>
+          <th>Class</th><th>Precision</th><th>Recall</th><th>F1</th><th>N</th>
+        </tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No per-class data</div>';
+
+      const r = m.research || {};
+      document.getElementById("uniquePoints").innerHTML = (r.unique_points || [])
+        .map(p => `<li>${p}</li>`).join("");
+      document.getElementById("scriptList").innerHTML = (r.pipeline_scripts || [])
+        .map(s => `<li>${s}</li>`).join("");
+      renderCascadeFlow(m.cascade_flow);
+    }
+
+    function renderStats(s) {
+      const n = s.total_sequences || 0;
+      const dbTotal = s.persisted_total ?? Object.values(s.persisted_alerts || {}).reduce((a, b) => a + b, 0);
+      const pa = s.persisted_alerts || {};
+      document.getElementById("sessionNote").innerHTML =
+        `KPIs below = <strong>this server session</strong> (resets on restart). ` +
+        `Session since restart: <strong>${n}</strong> · All-time in DB: <strong>${dbTotal}</strong>` +
+        (dbTotal ? ` (ALLOW ${pa.ALLOW || 0}, BLOCK ${pa.BLOCK || 0}, FLAG ${pa.FLAG || 0})` : "") +
+        ` — runtime verdicts only, not model accuracy.`;
+
+      document.getElementById("kpis").innerHTML = [
+        kpi("Sequences inspected", n),
+        kpi("Allowed", s.total_allowed || 0, "allow"),
+        kpi("Flagged", s.total_flagged || 0, "flag"),
+        kpi("Blocked", s.total_blocked || 0, "block"),
+        kpi("Block rate %", (s.block_rate_percent || 0).toFixed(1)),
+        kpi("Avg latency (ms)", (s.avg_latency_ms || 0).toFixed(2)),
+        kpi("Uptime (s)", s.uptime_seconds || 0),
+      ].join("");
+
+      const t1 = s.tier1_fast_allowed || 0;
+      const t2 = s.tier2_escalated || 0;
+      const t3 = s.tier3_checked || 0;
+      const blk = s.total_blocked || 0;
+      const flg = s.total_flagged || 0;
+      const alw = s.total_allowed || 0;
+
+      document.getElementById("funnel").innerHTML = [
+        { label: "All sequences", val: n, color: "var(--muted)" },
+        { label: "Tier-1 fast ALLOW", val: t1, color: "var(--green)" },
+        { label: "Tier-2 escalated", val: t2, color: "var(--blue)" },
+        { label: "Tier-3 checked", val: t3, color: "var(--purple)" },
+        { label: "Final BLOCK", val: blk, color: "var(--red)" },
+        { label: "Final FLAG", val: flg, color: "var(--amber)" },
+        { label: "Final ALLOW", val: alw, color: "var(--green)" },
+      ].map((step, i) => `
+        <div class="funnel-step">
+          ${i > 0 ? '<span class="arrow">↓</span>' : '<span style="width:14px"></span>'}
+          <span style="flex:1">${step.label}</span>
+          <strong style="color:${step.color}">${step.val}</strong>
+        </div>`).join("");
+
+      const attacks = s.attacks_detected || {};
+      const entries = Object.entries(attacks).filter(([, v]) => v > 0);
+      const maxA = Math.max(...entries.map(([, v]) => v), 1);
+      document.getElementById("attackBars").innerHTML = entries.length
+        ? entries.map(([k, v]) => bar(k.replace(/_/g, " "), v, maxA, "#f85149")).join("")
+        : '<div class="empty">No blocked attacks yet in this session</div>';
+    }
+
+    function renderTrace(trace) {
+      if (!trace || !trace.length) return '<em style="color:var(--muted)">No tier trace (legacy alert)</em>';
+      return trace.map(t => `
+        <div class="trace-step">
+          <strong>${t.tier}</strong> — ${t.decision || t.role || ""}<br>
+          <span style="color:var(--muted)">${t.explanation || ""}</span>
+          ${t.probabilities ? `<div style="margin-top:0.25rem">${Object.entries(t.probabilities).map(([k,v]) =>
+            `<span class="pill">${k}: ${(v*100).toFixed(0)}%</span>`).join("")}</div>` : ""}
+        </div>`).join("");
+    }
+
+    function alertsTableHtml(alerts, { expandable = true } = {}) {
+      if (!alerts.length) {
+        return '<div class="empty">No alerts — POST /predict or click “Run demo traffic”</div>';
+      }
+      const colSpan = expandable ? 7 : 6;
+      return `<table>
+        <thead><tr>
+          ${expandable ? "<th></th>" : ""}
+          <th>Time (UTC)</th><th>Action</th><th>Label</th><th>Confidence</th>
+          <th class="latency">Latency</th><th>Tiers</th>
+        </tr></thead>
+        <tbody>${alerts.map(a => {
+          const exp = expandable && expandedAlertId === a.id;
+          const lat = a.latency_ms != null ? `${Number(a.latency_ms).toFixed(2)} ms` : "—";
+          return `<tr>
+            ${expandable ? `<td><button class="expand-btn" onclick="toggleTrace(${a.id})">${exp ? "−" : "+"}</button></td>` : ""}
+            <td>${(a.created_at || "").replace("T", " ").slice(0, 19)}</td>
+            <td><span class="badge ${a.action}">${a.action}</span></td>
+            <td>${a.label}</td>
+            <td>${(a.confidence * 100).toFixed(1)}%</td>
+            <td class="latency">${lat}</td>
+            <td class="tiers">${(a.tiers_used || []).join(" → ")}</td>
+          </tr>${expandable && exp ? `<tr class="trace-row"><td colspan="${colSpan}">${renderTrace(a.tier_trace)}</td></tr>` : ""}`;
+        }).join("")}</tbody>
+      </table>`;
+    }
+
+    function renderAlerts(alerts) {
+      const wrap = document.getElementById("alertsWrap");
+      wrap.innerHTML = alertsTableHtml(alerts, { expandable: true });
+      const liveWrap = document.getElementById("liveAlertsWrap");
+      if (liveWrap) liveWrap.innerHTML = alertsTableHtml(alerts.slice(0, 8), { expandable: false });
+    }
+
+    window.toggleTrace = function(id) {
+      expandedAlertId = expandedAlertId === id ? null : id;
+      refresh();
+    };
+
+    async function refresh() {
+      try {
+        const [statsRes, alertsRes, healthRes, metricsRes] = await Promise.all([
+          fetch("/stats"), fetch("/alerts?limit=50"), fetch("/health"), fetch("/metrics/tiers"),
+        ]);
+        if (!statsRes.ok || !alertsRes.ok) throw new Error("API error");
+        const stats = await statsRes.json();
+        const alerts = (await alertsRes.json()).alerts || [];
+        const health = healthRes.ok ? await healthRes.json() : {};
+        if (metricsRes.ok) {
+          tierMetrics = await metricsRes.json();
+          renderTierMetrics(tierMetrics);
+        }
+        renderStats(stats);
+        const dbTotal = stats.persisted_total ?? 0;
+        const sub = document.getElementById("alertsSubtitle");
+        if (sub) sub.textContent = `(SQLite audit trail — ${dbTotal} all-time, showing latest ${alerts.length})`;
+        renderAlerts(alerts);
+        if (window._flowEngine) {
+          window._flowEngine.feedAlerts(alerts);
+          if (window._renderFlowFeed) window._renderFlowFeed(alerts);
+        }
+        document.getElementById("statusText").textContent =
+          `Live · ${health.round || "r18"} · tier3=${health.tier3_enabled ? "on" : "off"}`;
+        document.getElementById("liveDot").style.background = "#3fb950";
+      } catch (e) {
+        document.getElementById("statusText").textContent = "API offline";
+        document.getElementById("liveDot").style.background = "#f85149";
+      }
+    }
+
+    refresh();
+    setInterval(refresh, REFRESH_MS);
+  </script>
+  <script type="module">
+    import { initFlow3D, renderFlowFeed, renderLegend } from "/static/flow3d.js";
+
+    let flowEngine = null;
+    let flowReady = false;
+
+    window._initFlowTab = function () {
+      if (flowReady) return;
+      const container = document.getElementById("flowCanvas");
+      if (!container || flowEngine) return;
+      flowEngine = initFlow3D(container);
+      window._flowEngine = flowEngine;
+      renderLegend(document.getElementById("attackLegend"));
+      window._renderFlowFeed = (alerts) => renderFlowFeed(alerts, document.getElementById("flowFeed"));
+      flowReady = true;
+      fetch("/alerts?limit=50").then(r => r.json()).then(d => {
+        const alerts = d.alerts || [];
+        if (alerts.length) flowEngine.seedLastId(Math.max(...alerts.map(a => a.id)));
+        window._renderFlowFeed(alerts);
+      });
+    };
+
+    document.getElementById("demoTrafficBtn")?.addEventListener("click", async () => {
+      const btn = document.getElementById("demoTrafficBtn");
+      btn.disabled = true;
+      btn.textContent = "Firing…";
+      try {
+        window._initFlowTab();
+        await fetch("/demo/traffic?n=20", { method: "POST" });
+        const r = await fetch("/alerts?limit=50");
+        const alerts = (await r.json()).alerts || [];
+        flowEngine?.feedAlerts(alerts);
+        window._renderFlowFeed?.(alerts);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Run demo traffic";
+      }
+    });
+  </script>
+</body>
+</html>

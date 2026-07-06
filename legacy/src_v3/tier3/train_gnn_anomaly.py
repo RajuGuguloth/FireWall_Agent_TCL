@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,7 +23,7 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 # ─── Tier-2 CNN-GRU Definition ───────────────────────────────────────────────
 class CNNGRUClassifier(nn.Module):
     """Conv1D(in→64) → GRU(64→128, 2L) → Linear(128→5)"""
-    def __init__(self, input_size=17, num_classes=5):
+    def __init__(self, input_size=17, num_classes=6):
         super().__init__()
         self.conv1   = nn.Conv1d(input_size, 64, kernel_size=3, padding=1)
         self.bn1     = nn.BatchNorm1d(64, eps=1e-3)
@@ -137,7 +138,7 @@ def main():
     
     df = pd.read_csv(actual_data_path)
     
-    scaler_path = os.path.join(MODELS_DIR, "serialized", "v5_scaler.pkl")
+    scaler_path = os.path.join(MODELS_DIR, "serialized", "v6_scaler.pkl")
     scaler = joblib.load(scaler_path)
     feature_cols = list(getattr(scaler, 'feature_names_in_', []))
     if not feature_cols:
@@ -165,7 +166,7 @@ def main():
     print("\n[2/6] Extracting 128D Flow Behavioral Embeddings via Tier-2 CNN-GRU...")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     tier2_model = CNNGRUClassifier().to(device)
-    tier2_model.load_state_dict(torch.load(os.path.join(MODELS_DIR, "tier2_cnn_gru_v1_r17.pth"), map_location=device))
+    tier2_model.load_state_dict(torch.load(os.path.join(MODELS_DIR, "tier2_cnn_gru_v1_r18.pth"), map_location=device))
     tier2_model.eval()
     
     with torch.no_grad():
@@ -222,6 +223,15 @@ def main():
         threshold = np.percentile(train_directed_errors, 95)
     
     print(f"      Calculated Anomaly Threshold (95th Percentile): {threshold:.6f}")
+
+    # Persist the r18-aligned Tier-3 artifact + threshold (for inference reuse)
+    t3_path = os.path.join(MODELS_DIR, "tier3_gnn_autoencoder_r18.pth")
+    torch.save(model.state_dict(), t3_path)
+    with open(os.path.join(MODELS_DIR, "tier3_r18_threshold.json"), "w") as tf:
+        json.dump({"threshold": float(threshold), "percentile": 95,
+                   "edge_dim": 128, "source_model": "tier2_cnn_gru_v1_r18.pth",
+                   "scaler": "v6_scaler.pkl"}, tf, indent=2)
+    print(f"      Saved Tier-3 model -> {t3_path}")
 
     # 5. Evaluate
     print("\n[5/6] Evaluating on Mixed Graph (Normal + Zero-Day Attacks)...")

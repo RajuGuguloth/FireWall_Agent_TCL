@@ -138,7 +138,7 @@ ax.add_patch(FancyBboxPatch((0.1, 0.1), 13.8, 1.50,
     edgecolor=C_GREY, facecolor=C_LGREY, zorder=0))
 ax.text(7, 1.15, "Host Machine  (macOS  |  Python 3.x  |  scapy  |  PyTorch  |  scikit-learn)",
         ha="center", va="center", fontsize=9.5, fontweight="bold", color=C_NAVY)
-ax.text(7, 0.68, "Hybrid-Sentinel Tier-1 RF  +  Tier-2 CNN-GRU  +  Tier-3 GNN  run here "
+ax.text(7, 0.68, "Hybrid-Sentinel Tier-1 RF Gate  +  Tier-2 CNN-GRU  +  Tier-3 Mahalanobis detector run here "
         "on extracted features",
         ha="center", va="center", fontsize=8.8, color=C_NAVY)
 ax.text(7, 0.28, "Source: attack_lab/  |  capture_large.sh  |  extract_v5_features.py  |  "
@@ -163,6 +163,6 @@ pdf_path = os.path.join(OUT_DIR, "fig_docker_topology.pdf")
 png_path = os.path.join(OUT_DIR, "fig_docker_topology.png")
 plt.savefig(pdf_path, dpi=300, bbox_inches="tight", format="pdf")
 plt.savefig(png_path, dpi=300, bbox_inches="tight", format="png")
-print(f"✅  Saved PDF -> {pdf_path}")
-print(f"✅  Saved PNG -> {png_path}")
+print(f"Saved PDF -> {pdf_path}")
+print(f"Saved PNG -> {png_path}")
 plt.show()

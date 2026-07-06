@@ -1,3 +1,4 @@
+# LEGACY DEMO — not production. Use: uvicorn api.main:app (see CODEBASE.md)
 import os
 import numpy as np
 from decision.router import route_decision

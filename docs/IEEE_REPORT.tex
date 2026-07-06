@@ -1,0 +1,167 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{url}
+\usepackage{hyperref}
+
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+
+\begin{document}
+
+\title{Hybrid-Sentinel: A Confidence-Gated Three-Tier AI Firewall for NDN-Style Network Traffic}
+
+\author{
+\IEEEauthorblockN{Raju Guguloth}
+\IEEEauthorblockA{Department of Computer Science and Engineering\\
+Indian Institute of Technology Madras\\
+Chennai, India --- TC Collaboration Project\\
+Email: [your.email@domain.com]}
+}
+
+\maketitle
+
+\begin{abstract}
+Named Data Networking (NDN) shifts security focus from address-based filtering to content-centric inspection at forwarding nodes. We present \textit{Hybrid-Sentinel}, a three-tier machine-learning firewall that processes short packet-sequence windows and outputs \texttt{ALLOW}, \texttt{FLAG}, or \texttt{BLOCK} decisions with per-tier audit traces. Tier-1 is a lightweight Random Forest gate; Tier-2 is a six-class CNN-GRU exported to ONNX; Tier-3 is a Mahalanobis one-class detector on neural embeddings for zero-day novelty. On a held-out test set of 14,219 sequences (814 benign, 13,405 attack), the full cascade achieves 100\% attack detection, 0.86\% benign false-positive rate, Tier-2 macro-F1 of 0.985, and 4.19\,ms average CPU inference latency---3.1$\times$ faster than a 13\,ms gradient-boosting baseline.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Named Data Networking, intrusion detection, cascade classifier, ONNX, anomaly detection, deep packet inspection
+\end{IEEEkeywords}
+
+\section{Introduction}
+Traditional signature-based intrusion detection systems (IDS) such as Snort excel at line-rate matching but fail on zero-day and obfuscated attacks. Deep learning approaches (e.g., Packet BERT) improve generalization but are too expensive to run on every packet. NDN architectures process discrete content units at routers, motivating a \textit{hybrid} design: a fast filter on most traffic and a deep model on suspicious windows only \cite{tcl-wiki}.
+
+We implement this hybrid pattern in Round~18 (R18) of Hybrid-Sentinel, fixing critical flaws in Round~17 (R17) where benign traffic was excluded from Tier-2 training, causing 100\% benign false-positive rate.
+
+\section{Related Work}
+Snort and Suricata rely on deterministic pattern matching. CNN/RNN hybrids have been applied to flow-based IDS (e.g., CIC-IDS datasets). Our contribution is a \textit{confidence-gated cascade} with explicit benign class handling, shared 17-feature contract, ONNX deployment, and Tier-3 embedding anomaly detection aligned with production API logic.
+
+\section{System Architecture}
+Fig.~\ref{fig:arch} shows the runtime cascade. Each input is a window of 20 packets $\times$ 17 behavioral features (length, protocol flags, entropy, flow statistics). Tier-1 computes $P(\text{BENIGN})$ on a 51-dimensional window summary; if $P \geq 0.90$, the window is \texttt{ALLOW}ed. Otherwise Tier-2 classifies among six labels including \texttt{BENIGN}. High-confidence attacks are \texttt{BLOCK}ed; medium confidence yields \texttt{FLAG}. Tier-3 scores embedding novelty and \texttt{FLAG}s anomalies.
+
+Fig.~\ref{fig:orch} illustrates the build orchestration: PCAP $\rightarrow$ feature extraction $\rightarrow$ v6 sequences $\rightarrow$ training $\rightarrow$ ONNX export $\rightarrow$ unified \texttt{cascade\_r18.py} $\rightarrow$ FastAPI service.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{../results/ieee_figures/fig_r18_architecture_flow.pdf}
+\caption{Three-tier runtime decision flow (R18). Fast-path ALLOW bypasses deep inference when Tier-1 confidence is high.}
+\label{fig:arch}
+\end{figure}
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{../results/ieee_figures/fig_r18_orchestration_pipeline.pdf}
+\caption{End-to-end build, export, and deployment orchestration pipeline.}
+\label{fig:orch}
+\end{figure}
+
+\section{Methodology}
+
+\subsection{Feature Extraction}
+Seventeen features are extracted per packet from lab PCAP captures using Scapy: packet length, TCP/UDP/ICMP indicators, payload length and entropy, TCP flags, ports, TTL, and flow aggregates. Windows use size 20 and stride 10.
+
+\subsection{Data Splitting}
+Sequences are grouped by pseudo-flow blocks (1,000 contiguous same-label packets). A group-disjoint 70/15/15 train/validation/test split prevents temporal leakage. The scaler is fit on training data only. R17 incorrectly used the test set as validation; R18 corrects this.
+
+\subsection{Tier-1 Gate}
+A 150-tree Random Forest (156\,KB) performs binary BENIGN vs.\ ATTACK classification on concatenated mean, standard deviation, and last-packet features.
+
+\subsection{Tier-2 CNN-GRU}
+Architecture: Conv1D(17$\rightarrow$64) $\rightarrow$ GRU(64$\rightarrow$128, 2 layers) $\rightarrow$ linear classifier. Focal loss ($\gamma{=}2$) with elevated weight on \texttt{BENIGN}. Temperature scaling on the validation set calibrates confidence thresholds: BLOCK $>$ 0.95, FLAG $\in [0.80, 0.95]$.
+
+\subsection{Tier-3 Zero-Day Net}
+Mahalanobis distance on 128-D GRU embeddings fit to benign training distribution. Tier-3 outputs \texttt{FLAG} with label \texttt{ANOMALY}; it does not predict attack type.
+
+\subsection{Attack Classes}
+Five attack types plus benign: \texttt{BRUTE\_FORCE}, \texttt{DDOS\_HTTP\_FLOOD}, \texttt{SLOW\_HTTP}, \texttt{PORT\_SCAN}, \texttt{DNS\_TUNNELING}, \texttt{BENIGN}.
+
+\section{Experimental Setup}
+Traffic was captured in an isolated Docker lab emulating NDN producer--consumer patterns (HTTP, SSH, DNS services). The test set contains 14,219 sequences never seen during training. Evaluation uses \texttt{measure\_cascade\_flow.py} for end-to-end cascade metrics. Latency was benchmarked over 2,000 iterations on CPU with ONNX Runtime for Tier-2.
+
+\section{Results}
+
+\subsection{Classification Performance}
+Table~\ref{tab:metrics} summarizes per-tier results. Tier-2 macro-F1 is 0.9851. Weakest class is \texttt{BRUTE\_FORCE} (recall 0.914) due to overlap with slow HTTP patterns in early packets.
+
+\begin{table}[!t]
+\caption{Held-Out Test Metrics (n = 14,219)}
+\label{tab:metrics}
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metric} & \textbf{Tier-2} & \textbf{Full Cascade} \\
+\midrule
+Macro-F1 & 0.9851 & --- \\
+Attack detection (\%) & --- & 100.0 \\
+Benign FPR (\%) & --- & 0.86 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Fig.~\ref{fig:cm} shows the normalized confusion matrix. Fig.~\ref{fig:perclass} reports per-class precision, recall, and F1.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{../results/ieee_figures/fig_r18_confusion_matrix.pdf}
+\caption{Tier-2 normalized confusion matrix on held-out test set.}
+\label{fig:cm}
+\end{figure}
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{../results/ieee_figures/fig_r18_per_class_metrics.pdf}
+\caption{Per-class precision, recall, and F1 (Tier-2).}
+\label{fig:perclass}
+\end{figure}
+
+\subsection{Cascade Funnel}
+Fig.~\ref{fig:funnel} shows traffic distribution across stages: 5.7\% fast-path ALLOW at Tier-1; 94.3\% escalated to Tier-2; 13.2\% reach Tier-3 in full evaluation.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{../results/ieee_figures/fig_r18_cascade_funnel.pdf}
+\caption{Cascade traffic funnel (\% of input sequences per stage).}
+\label{fig:funnel}
+\end{figure}
+
+\subsection{Latency}
+Fig.~\ref{fig:lat} reports component latencies. Full cascade averages 4.19\,ms vs.\ 13\,ms G-Scaler baseline.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{../results/ieee_figures/fig_r18_latency_benchmark.pdf}
+\caption{Inference latency (CPU, n=2000). Dashed line: gradient-boosting baseline.}
+\label{fig:lat}
+\end{figure}
+
+\subsection{R17 vs.\ R18}
+R17 excluded \texttt{BENIGN} from Tier-2, yielding unusable production behavior (Fig.~\ref{fig:compare}). R18 restores benign handling and honest validation splits.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{../results/ieee_figures/fig_r17_vs_r18_comparison.pdf}
+\caption{R17 benign false-positive failure vs.\ R18 fix.}
+\label{fig:compare}
+\end{figure}
+
+\section{Discussion and Limitations}
+The system is validated on lab PCAP traffic (IP-overlay emulation), not yet on live NFD forwarders. Payload-byte models (Packet BERT) and malware-in-NDN-Data samples are planned integration paths. TLS-heavy enterprise traffic limits payload-dependent detection without edge decryption.
+
+\section{Conclusion}
+Hybrid-Sentinel demonstrates that a three-tier confidence-gated cascade can deliver high detection accuracy, low benign false-positive rate, and millisecond-scale CPU inference suitable for NDN edge deployment. R18 establishes a reproducible pipeline with unified configuration, single cascade implementation, and ONNX production path.
+
+\section*{Acknowledgment}
+The author thanks the TCL--IITM collaboration team for project guidance and infrastructure support.
+
+\begin{thebibliography}{00}
+\bibitem{tcl-wiki} Tushar Sood et al., ``Next-Generation Firewall Architectures: Rule-Based vs.\ AI Transformers,'' TCL--IITM GitLab Wiki, 2026.
+\bibitem{ndn} L. Zhang et al., ``Named Data Networking,'' \emph{ACM SIGCOMM CCR}, vol.\ 44, no.\ 3, 2014.
+\bibitem{cicids} I. Sharafaldin et al., ``Toward Generating a New Intrusion Detection Dataset and Intrusion Traffic Characterization,'' \emph{ICISSp}, 2018.
+\end{thebibliography}
+
+\end{document}

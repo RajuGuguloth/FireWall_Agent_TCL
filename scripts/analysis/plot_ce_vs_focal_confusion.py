@@ -103,7 +103,7 @@ def draw_cm(ax, cm, title, subtitle, cmap, macro_f1, valid, per_class):
 
     # Validity badge
     badge_color = "#E74C3C" if not valid else "#27AE60"
-    badge_text  = "⚠ LEAKED / INVALID" if not valid else "✅ VALID"
+    badge_text  = "LEAKED / INVALID" if not valid else "VALID"
     ax.set_title(f"{title}\n{subtitle}",
                  fontsize=12, fontweight="bold", pad=14)
     ax.text(0.5, 1.01, badge_text,
@@ -144,7 +144,7 @@ def draw_cm(ax, cm, title, subtitle, cmap, macro_f1, valid, per_class):
 ax1 = fig.add_subplot(gs[0])
 draw_cm(ax1,
         cm_r13,
-        "Round 13 — Cross-Entropy",
+        "Round 13 - Cross-Entropy",
         "Sequence-Level Split  |  33 features",
         cmap_r13,
         metrics["R13"]["macro_f1"],
@@ -154,7 +154,7 @@ draw_cm(ax1,
 ax2 = fig.add_subplot(gs[1])
 draw_cm(ax2,
         cm_r16,
-        "Round 16 — Focal Loss",
+        "Round 16 - Focal Loss",
         "GroupShuffleSplit  |  17 leak-free features",
         cmap_r16,
         metrics["R16"]["macro_f1"],
@@ -163,7 +163,7 @@ draw_cm(ax2,
 
 # ── Overall title ─────────────────────────────────────────────────
 fig.suptitle(
-    "Figure 6.3 — Impact of Focal Loss on Attack Detection Performance\n"
+    "Figure 6.3 - Impact of Focal Loss on Attack Detection Performance\n"
     "Cross-Entropy Baseline (R13) vs. Focal Loss with GroupShuffleSplit (R16)",
     fontsize=13, fontweight="bold", y=1.01
 )
@@ -176,7 +176,7 @@ fig.text(0.495, 0.47, "+32.2 pp\nSLOW F1", fontsize=8.5,
 
 # ── Footer ────────────────────────────────────────────────────────
 fig.text(0.01, -0.01,
-         "Source: results/proof_of_work_log.json  |  "
+    "Source: results/proof_of_work_log.json  |  "
          "Hybrid-Sentinel NDN AI Firewall  |  IITM M.Tech Thesis",
          fontsize=7.5, color="#999999", style="italic")
 
@@ -186,6 +186,6 @@ pdf_path = os.path.join(OUT_DIR, "fig_ce_vs_focal_confusion.pdf")
 png_path = os.path.join(OUT_DIR, "fig_ce_vs_focal_confusion.png")
 plt.savefig(pdf_path, dpi=300, bbox_inches="tight", format="pdf")
 plt.savefig(png_path, dpi=300, bbox_inches="tight", format="png")
-print(f"✅  Saved PDF → {pdf_path}")
-print(f"✅  Saved PNG → {png_path}")
+print(f"Saved PDF -> {pdf_path}")
+print(f"Saved PNG -> {png_path}")
 plt.show()

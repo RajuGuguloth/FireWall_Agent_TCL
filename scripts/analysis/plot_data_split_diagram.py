@@ -60,7 +60,7 @@ ax.set_xlim(0, 10)
 ax.set_ylim(0, 12)
 ax.axis("off")
 ax.set_facecolor("white")
-ax.set_title("✅  Correct Method: GroupShuffleSplit\n(Round 16 — Group-Disjoint, No Leakage)",
+ax.set_title("Correct Method: GroupShuffleSplit\n(Round 16 - Group-Disjoint, No Leakage)",
              fontsize=11, fontweight="bold", color=GREEN, pad=10)
 
 # Raw stream
@@ -111,7 +111,7 @@ box(ax, 5, 3.6, 8, 0.75, GREEN,
     "GUARANTEE:  Train Groups ∩ Test Groups = ∅\n(assert verified in refine_dataset.py)",
     fontsize=8.5, alpha=0.95)
 
-label(ax, 5, 2.8, "Result: Macro F1 = 0.9943  ✅  (Generalizable)", GREEN, fs=10)
+label(ax, 5, 2.8, "Result: Macro F1 = 0.9943 (Generalizable)", GREEN, fs=10)
 
 # ─────────────────────────────────────────────────────────────────
 # RIGHT PANEL: INVALID — Random train_test_split
@@ -121,7 +121,7 @@ ax.set_xlim(0, 10)
 ax.set_ylim(0, 12)
 ax.axis("off")
 ax.set_facecolor("white")
-ax.set_title("❌  Invalid Method: Sequence-Level Random Split\n(Round 14 — Same-Group Leakage)",
+ax.set_title("Invalid Method: Sequence-Level Random Split\n(Round 14 - Same-Group Leakage)",
              fontsize=11, fontweight="bold", color=RED, pad=10)
 
 # Raw stream
@@ -179,11 +179,11 @@ box(ax, 5, 3.6, 8, 0.75, RED,
     "Model memorises Port 80 → DDoS, Port 22 → BF\nNo behavioural learning occurs",
     fontsize=8.5, alpha=0.9)
 
-label(ax, 5, 2.8, "Result: Macro F1 = 1.0000  ❌  (Artefactual)", RED, fs=10)
+label(ax, 5, 2.8, "Result: Macro F1 = 1.0000 (Artefactual)", RED, fs=10)
 
 # ─────────────────────────────────────────────────────────────────
 fig.suptitle(
-    "Figure 5.3 — Data Splitting Architecture: Correct vs. Invalid Methodology",
+    "Figure 5.3 - Data Splitting Architecture: Correct vs. Invalid Methodology",
     fontsize=13, fontweight="bold", y=1.0
 )
 fig.text(0.01, -0.01,
@@ -196,6 +196,6 @@ pdf_path = os.path.join(OUT_DIR, "fig_data_split_diagram.pdf")
 png_path = os.path.join(OUT_DIR, "fig_data_split_diagram.png")
 plt.savefig(pdf_path, dpi=300, bbox_inches="tight", format="pdf")
 plt.savefig(png_path, dpi=300, bbox_inches="tight", format="png")
-print(f"✅  Saved PDF → {pdf_path}")
-print(f"✅  Saved PNG → {png_path}")
+print(f"Saved PDF -> {pdf_path}")
+print(f"Saved PNG -> {png_path}")
 plt.show()
