@@ -9,7 +9,7 @@ This README is the **project map**. Start here to find files and run the system 
 ## Table of contents
 
 1. [What this project does](#what-this-project-does)
-2. [Company submission checklist](#company-submission-checklist)
+2. [Project deliverables](#project-deliverables)
 3. [Prerequisites](#prerequisites)
 4. [First-time setup](#first-time-setup)
 5. [Two ways to run](#two-ways-to-run)
@@ -48,12 +48,12 @@ Packet window (20 × 17 features)
 
 ---
 
-## Company submission checklist
+## Project deliverables
 
-This repository is prepared for the final internship archival request. Use the table below to verify that each requested item is present before submitting the package.
+This repository is organized as a final handover package for the AI Firewall project. The table below maps each deliverable to the relevant implementation, report, and operational files.
 
-| Company requirement | Where it is covered |
-|---------------------|---------------------|
+| Deliverable | Where it is covered |
+|-------------|---------------------|
 | Final source code | Full repository, packaged by `scripts/package_submission.sh` |
 | Well documented report | `docs/FINAL_SUBMISSION_REPORT.md`, `docs/IEEE_REPORT.md`, `Hybrid_Sentinel__A_Three_Tier_Confidence_GatedAI_Firewall_for_NDN_Edge_Deployment.pdf` |
 | Training approach | [Full training pipeline](#full-training-pipeline), `docs/DESIGN_AND_IMPLEMENTATION.md` |
@@ -63,7 +63,7 @@ This repository is prepared for the final internship archival request. Use the t
 | Design notes and implementation details | `docs/DESIGN_AND_IMPLEMENTATION.md`, `docs/CODEBASE.md`, `src/inference/cascade_r18.py` |
 | Runnable demo / dashboard | FastAPI app in `api/main.py`; open `http://127.0.0.1:8000/` after server start |
 
-For the exact archive steps, see [How to package for submission](#how-to-package-for-submission) and `docs/SUBMISSION_PACKAGE.md`.
+For archive creation steps, see [How to package for submission](#how-to-package-for-submission) and `docs/SUBMISSION_PACKAGE.md`.
 
 ---
 
