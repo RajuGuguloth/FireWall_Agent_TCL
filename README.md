@@ -185,9 +185,11 @@ firewall_ml_project/
 │
 ├── docs/                             ← Documentation
 │   ├── CODEBASE.md                   ← Architecture rules for developers
-│   ├── INTERVIEW_PREP.md
-│   ├── AGENT_LOOP_PROMPTS.md
-│   └── thesis.pdf
+│   ├── DESIGN_AND_IMPLEMENTATION.md  ← Design notes & implementation details
+│   ├── FINAL_SUBMISSION_REPORT.md    ← Final handover report
+│   ├── SUBMISSION_PACKAGE.md         ← Packaging checklist
+│   ├── IEEE_REPORT.md                ← IEEE report notes
+│   └── thesis.pdf                    ← Thesis/report PDF
 │
 ├── tests/
 │   └── test_smoke.py                 ← Basic import / load tests
