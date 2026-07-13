@@ -1,0 +1,31 @@
+{
+  "n_windows": 206624,
+  "window_size": 20,
+  "n_features": 17,
+  "feature_names": [
+    "is_interest",
+    "is_data",
+    "name_depth",
+    "name_entropy",
+    "is_new_name",
+    "is_unsatisfiable",
+    "cs_hit",
+    "pit_aggregated",
+    "pit_size",
+    "pit_growth",
+    "cs_size",
+    "expired_since_last",
+    "interarrival",
+    "interest_rate_win",
+    "cs_hit_ratio_win",
+    "unsatisfied_ratio_win",
+    "name_diversity_win"
+  ],
+  "class_distribution": {
+    "BENIGN": 43299,
+    "INTEREST_FLOODING": 63308,
+    "CACHE_POLLUTION": 100017
+  },
+  "episodes_per_class": 200,
+  "seed": 42
+}

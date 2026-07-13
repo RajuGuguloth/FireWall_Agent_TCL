@@ -9,20 +9,22 @@ This README is the **project map**. Start here to find files and run the system 
 ## Table of contents
 
 1. [What this project does](#what-this-project-does)
-2. [Project deliverables](#project-deliverables)
-3. [Prerequisites](#prerequisites)
-4. [First-time setup](#first-time-setup)
-5. [Two ways to run](#two-ways-to-run)
-6. [Folder map — where everything lives](#folder-map--where-everything-lives)
-7. [Key files quick reference](#key-files-quick-reference)
-8. [Full training pipeline](#full-training-pipeline)
-9. [Run the API & dashboard](#run-the-api--dashboard)
-10. [Docker](#docker)
-11. [Verify it works](#verify-it-works)
-12. [Results & artifacts](#results--artifacts)
-13. [How to package for submission](#how-to-package-for-submission)
-14. [Troubleshooting](#troubleshooting)
-15. [More documentation](#more-documentation)
+2. [Scope: production vs NDN PoC](#scope-production-pipeline-vs-ndn-proof-of-concept)
+3. [Project deliverables](#project-deliverables)
+4. [Prerequisites](#prerequisites)
+5. [First-time setup](#first-time-setup)
+6. [Two ways to run](#two-ways-to-run)
+7. [Folder map — where everything lives](#folder-map--where-everything-lives)
+8. [Key files quick reference](#key-files-quick-reference)
+9. [Full training pipeline](#full-training-pipeline)
+10. [NDN proof-of-concept](#ndn-proof-of-concept)
+11. [Run the API & dashboard](#run-the-api--dashboard)
+12. [Docker](#docker)
+13. [Verify it works](#verify-it-works)
+14. [Results & artifacts](#results--artifacts)
+15. [How to package for submission](#how-to-package-for-submission)
+16. [Troubleshooting](#troubleshooting)
+17. [More documentation](#more-documentation)
 
 ---
 
@@ -48,6 +50,32 @@ Packet window (20 × 17 features)
 
 ---
 
+## Scope: production pipeline vs. NDN proof-of-concept
+
+This project has **two complementary parts**, and it is important to be precise
+about what each is evaluated on:
+
+1. **Production three-tier cascade** (`src/`, `api/`, `models/`) — trained and
+   evaluated on **real TCP/IP captures** from an isolated Docker lab. The six
+   classes above are conventional network intrusions (brute force, slow HTTP,
+   HTTP flood, port scan, DNS tunnelling). This is the validated, deployable core.
+
+2. **NDN proof-of-concept** (`ndn_poc/`) — a controlled discrete-event **NDN
+   simulation** (PIT + Content Store + FIB) that reproduces the two canonical
+   NDN-native attacks, **Interest Flooding** (PIT exhaustion) and **Cache
+   Pollution** (Content Store hit-ratio collapse), extracts NDN-native features,
+   and shows the same behavioural-window detection approach transfers to NDN
+   forwarder state. Held-out results: **99.58% accuracy, 0.9953 macro-F1**,
+   **0.67% benign FPR** (51,656 test windows). IEEE-ready figures:
+   [`docs/ndn_poc/ieee/`](docs/ndn_poc/ieee/). See [`ndn_poc/README.md`](ndn_poc/README.md).
+
+NDN is the **motivation and forward-looking target**; the production numbers are
+measured on IP traffic. The `ndn_poc/` module provides executable evidence for
+the NDN claims without overstating them. Paste NDN figures into IEEE LaTeX using
+[`docs/ndn_poc/ieee/ndn_figures_latex.tex`](docs/ndn_poc/ieee/ndn_figures_latex.tex).
+
+---
+
 ## Project deliverables
 
 This repository is organized as a final handover package for the AI Firewall project. The table below maps each deliverable to the relevant implementation, report, and operational files.
@@ -62,6 +90,8 @@ This repository is organized as a final handover package for the AI Firewall pro
 | Overall setup documentation | [First-time setup](#first-time-setup), [Run the API & dashboard](#run-the-api--dashboard), [Docker](#docker) |
 | Design notes and implementation details | `docs/DESIGN_AND_IMPLEMENTATION.md`, `docs/CODEBASE.md`, `src/inference/cascade_r18.py` |
 | Runnable demo / dashboard | FastAPI app in `api/main.py`; open `http://127.0.0.1:8000/` after server start |
+| NDN PoC (Interest Flooding, Cache Pollution) | `ndn_poc/` simulator + [`docs/ndn_poc/ieee/`](docs/ndn_poc/ieee/) figures |
+| IEEE NDN result figures | `docs/ndn_poc/ieee/fig_ndn_*.pdf` — regenerate with `scripts/analysis/generate_ieee_figures_ndn.py` |
 
 For archive creation steps, see [How to package for submission](#how-to-package-for-submission) and `docs/SUBMISSION_PACKAGE.md`.
 
@@ -157,8 +187,17 @@ firewall_ml_project/
 │   │   └── eval_pipeline_v6.py        ← Tier-1+2 only (quick check)
 │   ├── benchmark/
 │   │   └── benchmark_latency.py
-│   ├── analysis/                      ← Thesis plots & figures
+│   ├── analysis/                      ← Thesis plots & IEEE figures
+│   │   ├── generate_ieee_figures_r18.py
+│   │   └── generate_ieee_figures_ndn.py   ← NDN PoC IEEE figures
 │   └── etl/                           ← Old v4/v5 data scripts (legacy)
+│
+├── ndn_poc/                          ← NDN SIMULATOR (separate from production R18)
+│   ├── simulator.py                  ← PIT + Content Store discrete-event model
+│   ├── features.py                   ← 17 NDN-native features
+│   ├── generate_dataset.py
+│   ├── train_poc.py
+│   └── README.md
 │
 ├── data/
 │   ├── raw/
@@ -189,6 +228,9 @@ firewall_ml_project/
 │   ├── FINAL_SUBMISSION_REPORT.md    ← Final handover report
 │   ├── SUBMISSION_PACKAGE.md         ← Packaging checklist
 │   ├── IEEE_REPORT.md                ← IEEE report notes
+│   ├── ndn_poc/                      ← NDN PoC metrics + IEEE figures (committed)
+│   │   ├── ndn_metrics.json
+│   │   └── ieee/fig_ndn_*.pdf        ← Paste into IEEE LaTeX
 │   └── thesis.pdf                    ← Thesis/report PDF
 │
 ├── tests/
@@ -274,6 +316,38 @@ python scripts/analysis/generate_submission_metrics_r18.py
 ```
 
 Expected outputs land in `models/`, `data/splits/v6_sequences/`, and `results/`.
+
+---
+
+## NDN proof-of-concept
+
+Separate from the production R18 cascade. Simulates a single NDN forwarder (PIT +
+Content Store) and detects **Interest Flooding** and **Cache Pollution** using
+17 NDN-native features in 20-packet windows.
+
+```bash
+# 1) Generate simulated NDN dataset (optional — metrics JSON already in docs/ndn_poc/)
+python -m ndn_poc.generate_dataset --episodes 200 --out data/ndn
+
+# 2) Train PoC classifier and write results/ndn/ndn_metrics.json
+python -m ndn_poc.train_poc --data data/ndn
+
+# 3) Generate IEEE-ready PDF/PNG figures for the paper
+python scripts/analysis/generate_ieee_figures_ndn.py
+```
+
+**Committed IEEE figures (use in Overleaf / IEEE LaTeX):**
+
+| File | Description |
+|------|-------------|
+| `docs/ndn_poc/ieee/fig_ndn_architecture.pdf` | PIT + CS topology |
+| `docs/ndn_poc/ieee/fig_ndn_confusion_matrix.pdf` | Held-out confusion matrix |
+| `docs/ndn_poc/ieee/fig_ndn_per_class_metrics.pdf` | Per-class P/R/F1 |
+| `docs/ndn_poc/ieee/fig_ndn_summary_metrics.pdf` | Accuracy, macro-F1, detection, FPR |
+| `docs/ndn_poc/ieee/ndn_figures_latex.tex` | Ready-to-paste LaTeX block |
+
+Held-out NDN PoC metrics (`docs/ndn_poc/ndn_metrics.json`): **99.53% macro-F1**,
+**99.65% attack detection**, **0.67% benign FPR** on **51,656** test windows.
 
 ---
 
@@ -408,6 +482,19 @@ Held-out test set: **14,219 sequences** (814 benign, 13,405 attack)
 Detailed metrics: `results/r18_tier_metrics.json`  
 Latency benchmark: `results/r18_latency_benchmark.json`
 
+### NDN PoC (simulated forwarder — separate from R18 production)
+
+| Metric | Value |
+|--------|-------|
+| Test windows | 51,656 |
+| Macro-F1 | 0.9953 |
+| Attack detection | 99.65% |
+| Benign FPR | 0.67% |
+| Classes | BENIGN, INTEREST_FLOODING, CACHE_POLLUTION |
+
+Metrics JSON: `docs/ndn_poc/ndn_metrics.json`  
+IEEE figures: `docs/ndn_poc/ieee/fig_ndn_*.pdf`
+
 ---
 
 ## How to package for submission
@@ -448,12 +535,13 @@ Before sending, follow `docs/SUBMISSION_PACKAGE.md`.
 
 | Document | Contents |
 |----------|----------|
-| [docs/IEEE_REPORT.md](docs/IEEE_REPORT.md) | IEEE figure guide (repo paths) |
+| [ndn_poc/README.md](ndn_poc/README.md) | NDN simulator, attacks, features, limitations |
+| [docs/ndn_poc/ieee/ndn_figures_latex.tex](docs/ndn_poc/ieee/ndn_figures_latex.tex) | Paste NDN figures into IEEE LaTeX |
+| [docs/IEEE_REPORT.md](docs/IEEE_REPORT.md) | IEEE figure guide (R18 + NDN paths) |
 | **`Hybrid_Sentinel_IEEE_Overleaf.zip`** | **Self-contained Overleaf package** |
 | [docs/DESIGN_AND_IMPLEMENTATION.md](docs/DESIGN_AND_IMPLEMENTATION.md) | Design notes & implementation details |
 | [docs/SUBMISSION_PACKAGE.md](docs/SUBMISSION_PACKAGE.md) | How to zip and submit final deliverables |
 | [docs/CODEBASE.md](docs/CODEBASE.md) | Developer rules, production vs legacy |
-| [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md) | Interview talking points |
 | [legacy/README.md](legacy/README.md) | What not to use |
 | [docs/thesis.pdf](docs/thesis.pdf) | Full thesis document |
 
