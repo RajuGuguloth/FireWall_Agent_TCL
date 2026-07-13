@@ -62,8 +62,8 @@ C_GREY = "#6E7781"
 
 def _load_metrics() -> dict:
     for p in (
-        _ROOT / "docs" / "ndn_poc" / "ndn_metrics.json",
         _ROOT / "results" / "ndn" / "ndn_metrics.json",
+        _ROOT / "docs" / "ndn_poc" / "ndn_metrics.json",
     ):
         if p.is_file():
             with open(p) as f:
@@ -72,6 +72,59 @@ def _load_metrics() -> dict:
         "ndn_metrics.json not found. Run: python -m ndn_poc.generate_dataset && "
         "python -m ndn_poc.train_poc"
     )
+
+
+def _roc_from_model() -> dict | None:
+    """Recompute ROC curve points from saved PoC model (for figure plotting)."""
+    import os
+
+    import joblib
+    from sklearn.metrics import auc, roc_curve
+
+    data_dir = _ROOT / "data" / "ndn"
+    model_path = _ROOT / "models" / "ndn" / "ndn_poc_rf.pkl"
+    scaler_path = _ROOT / "models" / "ndn" / "ndn_poc_scaler.pkl"
+    if not all(p.is_file() for p in (data_dir / "ndn_windows.npy", model_path, scaler_path)):
+        return None
+
+    X = np.load(data_dir / "ndn_windows.npy")
+    y = np.load(data_dir / "ndn_labels.npy")
+    from sklearn.model_selection import train_test_split
+
+    _, Xte, _, yte = train_test_split(
+        X, y, test_size=0.25, stratify=y, random_state=42,
+    )
+    clf = joblib.load(model_path)
+    scaler = joblib.load(scaler_path)
+    F = X.shape[2]
+
+    def prep(A: np.ndarray) -> np.ndarray:
+        from ndn_poc.train_poc import summary
+
+        flat = scaler.transform(A.reshape(-1, F))
+        flat = np.clip(flat, -5.0, 5.0)
+        return summary(flat.reshape(A.shape))
+
+    Ste = prep(Xte)
+    proba = clf.predict_proba(Ste)
+    classes = list(clf.classes_)
+    benign_idx = classes.index("BENIGN")
+
+    y_attack = (yte != "BENIGN").astype(int)
+    fpr_attack, tpr_attack, _ = roc_curve(y_attack, 1.0 - proba[:, benign_idx])
+    roc_ovr = {}
+    for i, c in enumerate(classes):
+        y_bin = (yte == c).astype(int)
+        fpr_c, tpr_c, _ = roc_curve(y_bin, proba[:, i])
+        roc_ovr[c] = {
+            "auc": float(auc(fpr_c, tpr_c)),
+            "fpr": fpr_c.tolist(),
+            "tpr": tpr_c.tolist(),
+        }
+    return {
+        "roc_attack_binary": {"fpr": fpr_attack.tolist(), "tpr": tpr_attack.tolist()},
+        "roc_ovr": roc_ovr,
+    }
 
 
 def _save(fig: plt.Figure, stem: str) -> None:
@@ -191,6 +244,85 @@ def fig_architecture() -> None:
     _save(fig, "fig_ndn_architecture")
 
 
+def fig_roc_curves(m: dict) -> None:
+    """Binary attack ROC + per-class one-vs-rest curves."""
+    curves = m if "roc_attack_binary" in m else None
+    if curves is None:
+        curves = _roc_from_model()
+    if curves is None:
+        print("  skip ROC (re-run: python -m ndn_poc.train_poc)")
+        return
+
+    fig, (ax_bin, ax_ovr) = plt.subplots(1, 2, figsize=(6.8, 2.8))
+
+    fpr = curves["roc_attack_binary"]["fpr"]
+    tpr = curves["roc_attack_binary"]["tpr"]
+    auc_bin = m.get("roc_auc_attack_binary", 0.0)
+    ax_bin.plot(fpr, tpr, color=C_BLUE, lw=2, label=f"Attack vs benign (AUC={auc_bin:.4f})")
+    ax_bin.plot([0, 1], [0, 1], "--", color=C_GREY, lw=1)
+    ax_bin.set_xlabel("False Positive Rate")
+    ax_bin.set_ylabel("True Positive Rate")
+    ax_bin.set_title("Binary Attack Detection ROC")
+    ax_bin.legend(fontsize=7, loc="lower right", frameon=False)
+    ax_bin.set_xlim(-0.02, 1.02)
+    ax_bin.set_ylim(-0.02, 1.02)
+
+    colors_ovr = {"BENIGN": C_GREEN, "CACHE_POLLUTION": C_ORANGE, "INTEREST_FLOODING": C_RED}
+    for c, roc in curves.get("roc_ovr", m.get("roc_ovr", {})).items():
+        col = colors_ovr.get(c, C_BLUE)
+        if "fpr" in roc:
+            ax_ovr.plot(
+                roc["fpr"], roc["tpr"], lw=1.8, color=col,
+                label=f"{c.replace('_', ' ')} (AUC={roc['auc']:.4f})",
+            )
+        else:
+            ax_ovr.plot([], [], lw=1.8, color=col,
+                        label=f"{c.replace('_', ' ')} (AUC={roc['auc']:.4f})")
+    ax_ovr.plot([0, 1], [0, 1], "--", color=C_GREY, lw=1)
+    ax_ovr.set_xlabel("False Positive Rate")
+    ax_ovr.set_ylabel("True Positive Rate")
+    macro_auc = m.get("roc_auc_macro_ovr", 0.0)
+    ax_ovr.set_title(f"One-vs-Rest ROC (macro AUC={macro_auc:.4f})")
+    ax_ovr.legend(fontsize=6, loc="lower right", frameon=False)
+    ax_ovr.set_xlim(-0.02, 1.02)
+    ax_ovr.set_ylim(-0.02, 1.02)
+
+    fig.tight_layout()
+    _save(fig, "fig_ndn_roc_curves")
+
+
+def fig_per_class_accuracy(m: dict) -> None:
+    """Per-class accuracy (diagonal of confusion matrix / row support)."""
+    if "per_class_accuracy" not in m:
+        labels = m["confusion_matrix"]["labels"]
+        cm = np.array(m["confusion_matrix"]["matrix"], dtype=float)
+        row_sum = cm.sum(axis=1)
+        acc = {
+            lb: (cm[i, i] / row_sum[i] if row_sum[i] else 0.0)
+            for i, lb in enumerate(labels)
+        }
+    else:
+        acc = m["per_class_accuracy"]
+
+    classes = list(acc.keys())
+    vals = [acc[c] * 100 for c in classes]
+    colors = [C_GREEN if c == "BENIGN" else C_BLUE for c in classes]
+
+    fig, ax = plt.subplots(figsize=(3.5, 2.6))
+    bars = ax.bar(
+        [c.replace("_", "\n") for c in classes], vals,
+        color=colors, edgecolor="white", linewidth=0.8,
+    )
+    ax.set_ylabel("Accuracy (%)")
+    ax.set_title(f"NDN PoC — Per-Class Accuracy (overall {m['accuracy']*100:.2f}%)")
+    ax.set_ylim(90, 101)
+    for b, v in zip(bars, vals):
+        ax.text(b.get_x() + b.get_width() / 2, v + 0.15, f"{v:.2f}%", ha="center", fontsize=7)
+    plt.setp(ax.get_xticklabels(), fontsize=7)
+    fig.tight_layout()
+    _save(fig, "fig_ndn_per_class_accuracy")
+
+
 def write_latex_snippet(m: dict) -> None:
     snippet = DOCS_OUT / "ndn_figures_latex.tex"
     snippet.write_text(
@@ -203,7 +335,9 @@ A Random Forest on 20-packet windows of 17 NDN-native features achieves
 """
         + f"{m['macro_f1']:.4f} macro-F1 on {m['n_test']:,} held-out windows "
         + f"({m['attack_detection_rate']*100:.2f}\\% attack detection, "
-        + f"{m['benign_false_positive_rate']*100:.2f}\\% benign FPR).\n\n"
+        + f"{m['benign_false_positive_rate']*100:.2f}\\% benign FPR"
+        + (f", ROC-AUC={m['roc_auc_attack_binary']:.4f}" if "roc_auc_attack_binary" in m else "")
+        + ").\n\n"
         + r"""\begin{figure}[!t]
 \centering
 \includegraphics[width=\linewidth]{docs/ndn_poc/ieee/fig_ndn_architecture.pdf}
@@ -218,6 +352,15 @@ A Random Forest on 20-packet windows of 17 NDN-native features achieves
 \includegraphics[width=0.48\linewidth]{docs/ndn_poc/ieee/fig_ndn_per_class_metrics.pdf}
 \caption{NDN PoC held-out results: normalized confusion matrix (left) and per-class metrics (right).}
 \label{fig:ndn_results}
+\end{figure}
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=0.48\linewidth]{docs/ndn_poc/ieee/fig_ndn_roc_curves.pdf}
+\hfill
+\includegraphics[width=0.48\linewidth]{docs/ndn_poc/ieee/fig_ndn_per_class_accuracy.pdf}
+\caption{NDN PoC ROC curves (left) and per-class accuracy (right).}
+\label{fig:ndn_roc_accuracy}
 \end{figure}
 
 \begin{figure}[!t]
@@ -242,6 +385,8 @@ def main() -> None:
     fig_confusion_matrix(m)
     fig_per_class_metrics(m)
     fig_summary_bars(m)
+    fig_roc_curves(m)
+    fig_per_class_accuracy(m)
     write_latex_snippet(m)
     print(f"\nDone. Figures in:\n  {OUT}\n  {DOCS_OUT}")
 

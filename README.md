@@ -85,8 +85,8 @@ This repository is organized as a final handover package for the AI Firewall pro
 | Final source code | Full repository, packaged by `scripts/package_submission.sh` |
 | Well documented report | `docs/FINAL_SUBMISSION_REPORT.md`, `docs/IEEE_REPORT.md`, `Hybrid_Sentinel__A_Three_Tier_Confidence_GatedAI_Firewall_for_NDN_Edge_Deployment.pdf` |
 | Training approach | [Full training pipeline](#full-training-pipeline), `docs/DESIGN_AND_IMPLEMENTATION.md` |
-| Performance metrics | `results/submission_metrics_r18.json`, `results/r18_tier_metrics.json`, `results/r18_latency_benchmark.json` |
-| Evaluation results | `scripts/eval/measure_cascade_flow.py`, `api/tier_metrics.py`, `results/submission_figures/` |
+| Performance metrics | `docs/r18/metrics/submission_metrics_r18.json`, `results/r18_tier_metrics.json`, `results/r18_latency_benchmark.json` |
+| Evaluation results | `scripts/eval/measure_cascade_flow.py`, `api/tier_metrics.py`, `docs/r18/metrics/` (ROC + accuracy figures) |
 | Overall setup documentation | [First-time setup](#first-time-setup), [Run the API & dashboard](#run-the-api--dashboard), [Docker](#docker) |
 | Design notes and implementation details | `docs/DESIGN_AND_IMPLEMENTATION.md`, `docs/CODEBASE.md`, `src/inference/cascade_r18.py` |
 | Runnable demo / dashboard | FastAPI app in `api/main.py`; open `http://127.0.0.1:8000/` after server start |
@@ -189,6 +189,7 @@ firewall_ml_project/
 │   │   └── benchmark_latency.py
 │   ├── analysis/                      ← Thesis plots & IEEE figures
 │   │   ├── generate_ieee_figures_r18.py
+│   │   ├── generate_submission_metrics_r18.py  ← ROC-AUC + accuracy plots
 │   │   └── generate_ieee_figures_ndn.py   ← NDN PoC IEEE figures
 │   └── etl/                           ← Old v4/v5 data scripts (legacy)
 │
@@ -231,6 +232,9 @@ firewall_ml_project/
 │   ├── ndn_poc/                      ← NDN PoC metrics + IEEE figures (committed)
 │   │   ├── ndn_metrics.json
 │   │   └── ieee/fig_ndn_*.pdf        ← Paste into IEEE LaTeX
+│   └── r18/metrics/                  ← R18 proof-of-ML figures (committed)
+│       ├── submission_metrics_r18.json
+│       └── fig_submission_*.pdf      ← ROC curves, accuracy bars, confusion matrices
 │   └── thesis.pdf                    ← Thesis/report PDF
 │
 ├── tests/
@@ -344,10 +348,13 @@ python scripts/analysis/generate_ieee_figures_ndn.py
 | `docs/ndn_poc/ieee/fig_ndn_confusion_matrix.pdf` | Held-out confusion matrix |
 | `docs/ndn_poc/ieee/fig_ndn_per_class_metrics.pdf` | Per-class P/R/F1 |
 | `docs/ndn_poc/ieee/fig_ndn_summary_metrics.pdf` | Accuracy, macro-F1, detection, FPR |
+| `docs/ndn_poc/ieee/fig_ndn_roc_curves.pdf` | Binary + one-vs-rest ROC-AUC curves |
+| `docs/ndn_poc/ieee/fig_ndn_per_class_accuracy.pdf` | Per-class accuracy bar chart |
 | `docs/ndn_poc/ieee/ndn_figures_latex.tex` | Ready-to-paste LaTeX block |
 
-Held-out NDN PoC metrics (`docs/ndn_poc/ndn_metrics.json`): **99.53% macro-F1**,
-**99.65% attack detection**, **0.67% benign FPR** on **51,656** test windows.
+Held-out NDN PoC metrics (`docs/ndn_poc/ndn_metrics.json`): **99.58% accuracy**,
+**99.53% macro-F1**, **ROC-AUC 0.9997** (attack vs benign), **99.65% attack detection**,
+**0.67% benign FPR** on **51,656** test windows.
 
 ---
 
@@ -482,18 +489,32 @@ Held-out test set: **14,219 sequences** (814 benign, 13,405 attack)
 Detailed metrics: `results/r18_tier_metrics.json`  
 Latency benchmark: `results/r18_latency_benchmark.json`
 
+**Proof-of-ML figures** (committed under `docs/r18/metrics/` — regenerate with
+`python scripts/analysis/generate_submission_metrics_r18.py`):
+
+| Figure | Description |
+|--------|-------------|
+| `fig_submission_tier_metric_comparison.pdf` | Per-tier accuracy, precision, recall, F1 |
+| `fig_submission_tier1_roc_curve.pdf` | Tier-1 gate attack-detection ROC-AUC |
+| `fig_submission_tier2_roc_curve.pdf` | Tier-2 CNN-GRU attack-detection ROC-AUC |
+| `fig_submission_tier3_roc_curve.pdf` | Tier-3 Mahalanobis anomaly ROC-AUC |
+| `fig_submission_tier2_confusion_matrix.pdf` | Tier-2 normalized confusion matrix |
+| `fig_submission_e2e_security_rates.pdf` | End-to-end detection, FPR, precision, F1 |
+
 ### NDN PoC (simulated forwarder — separate from R18 production)
 
 | Metric | Value |
 |--------|-------|
 | Test windows | 51,656 |
+| Accuracy | 99.58% |
 | Macro-F1 | 0.9953 |
+| ROC-AUC (attack vs benign) | 0.9997 |
 | Attack detection | 99.65% |
 | Benign FPR | 0.67% |
 | Classes | BENIGN, INTEREST_FLOODING, CACHE_POLLUTION |
 
 Metrics JSON: `docs/ndn_poc/ndn_metrics.json`  
-IEEE figures: `docs/ndn_poc/ieee/fig_ndn_*.pdf`
+IEEE figures: `docs/ndn_poc/ieee/fig_ndn_*.pdf` (includes ROC + per-class accuracy)
 
 ---
 

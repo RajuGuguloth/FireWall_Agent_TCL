@@ -27,10 +27,14 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
     accuracy_score,
+    auc,
     classification_report,
     confusion_matrix,
     f1_score,
+    roc_auc_score,
+    roc_curve,
 )
+from sklearn.preprocessing import label_binarize
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
@@ -80,10 +84,33 @@ def main() -> None:
     clf.n_jobs = 1
 
     pred = clf.predict(Ste)
+    proba = clf.predict_proba(Ste)
     acc = accuracy_score(yte, pred)
     macro_f1 = f1_score(yte, pred, average="macro")
     report = classification_report(yte, pred, output_dict=True, zero_division=0)
     cm = confusion_matrix(yte, pred, labels=classes)
+
+    benign_idx = classes.index("BENIGN")
+    y_attack = (yte != "BENIGN").astype(int)
+    p_attack = 1.0 - proba[:, benign_idx]
+    fpr_attack, tpr_attack, _ = roc_curve(y_attack, p_attack)
+    roc_auc_attack = float(auc(fpr_attack, tpr_attack))
+
+    yte_bin = label_binarize(yte, classes=classes)
+    roc_auc_ovr = float(
+        roc_auc_score(yte_bin, proba, multi_class="ovr", average="macro")
+    )
+    per_class_roc = {}
+    for i, c in enumerate(classes):
+        y_bin = (yte == c).astype(int)
+        fpr_c, tpr_c, _ = roc_curve(y_bin, proba[:, i])
+        per_class_roc[c] = {"auc": round(float(auc(fpr_c, tpr_c)), 4)}
+
+    row_sum = cm.sum(axis=1)
+    per_class_accuracy = {
+        c: round(float(cm[i, i] / row_sum[i]), 4) if row_sum[i] else 0.0
+        for i, c in enumerate(classes)
+    }
 
     joblib.dump(clf, os.path.join(args.models_out, "ndn_poc_rf.pkl"))
     joblib.dump(scaler, os.path.join(args.models_out, "ndn_poc_scaler.pkl"))
@@ -106,9 +133,24 @@ def main() -> None:
             c: {k: round(float(report[c][k]), 4) for k in ("precision", "recall", "f1-score")}
             for c in classes if c in report
         },
+        "per_class_accuracy": per_class_accuracy,
+        "roc_auc_macro_ovr": round(roc_auc_ovr, 4),
+        "roc_auc_attack_binary": round(roc_auc_attack, 4),
+        "roc_ovr": per_class_roc,
         "confusion_matrix": {"labels": classes, "matrix": cm.tolist()},
     }
+    metrics_full = {
+        **metrics,
+        "roc_attack_binary": {
+            "fpr": [round(float(v), 6) for v in fpr_attack],
+            "tpr": [round(float(v), 6) for v in tpr_attack],
+        },
+    }
     with open(os.path.join(args.results_out, "ndn_metrics.json"), "w") as f:
+        json.dump(metrics_full, f, indent=2)
+    docs_metrics = os.path.join("docs", "ndn_poc", "ndn_metrics.json")
+    os.makedirs(os.path.dirname(docs_metrics), exist_ok=True)
+    with open(docs_metrics, "w") as f:
         json.dump(metrics, f, indent=2)
 
     _plot_cm(cm, classes, os.path.join(args.results_out, "ndn_confusion_matrix.png"))
@@ -131,6 +173,7 @@ def main() -> None:
     for row_label, row in zip(classes, cm):
         print(f"    {row_label:<18}: {row.tolist()}")
     print(f"  saved metrics -> {args.results_out}/ndn_metrics.json")
+    print(f"  saved metrics -> docs/ndn_poc/ndn_metrics.json")
     print(f"  saved figure  -> {args.results_out}/ndn_confusion_matrix.png")
 
 

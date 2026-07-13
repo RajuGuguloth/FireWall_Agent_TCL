@@ -27,6 +27,24 @@
       "f1-score": 1.0
     }
   },
+  "per_class_accuracy": {
+    "BENIGN": 0.9933,
+    "CACHE_POLLUTION": 0.9943,
+    "INTEREST_FLOODING": 1.0
+  },
+  "roc_auc_macro_ovr": 0.9998,
+  "roc_auc_attack_binary": 0.9997,
+  "roc_ovr": {
+    "BENIGN": {
+      "auc": 0.9997
+    },
+    "CACHE_POLLUTION": {
+      "auc": 0.9998
+    },
+    "INTEREST_FLOODING": {
+      "auc": 1.0
+    }
+  },
   "confusion_matrix": {
     "labels": [
       "BENIGN",

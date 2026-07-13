@@ -4,7 +4,7 @@ Separate from the IP-validated R18 cascade, we simulate a single NDN router
 with Pending Interest Table (PIT) and Content Store (CS), reproducing
 \textsc{Interest Flooding} and \textsc{Cache Pollution} attacks.
 A Random Forest on 20-packet windows of 17 NDN-native features achieves
-0.9953 macro-F1 on 51,656 held-out windows (99.65\% attack detection, 0.67\% benign FPR).
+0.9953 macro-F1 on 51,656 held-out windows (99.65\% attack detection, 0.67\% benign FPR, ROC-AUC=0.9997).
 
 \begin{figure}[!t]
 \centering
@@ -20,6 +20,15 @@ A Random Forest on 20-packet windows of 17 NDN-native features achieves
 \includegraphics[width=0.48\linewidth]{docs/ndn_poc/ieee/fig_ndn_per_class_metrics.pdf}
 \caption{NDN PoC held-out results: normalized confusion matrix (left) and per-class metrics (right).}
 \label{fig:ndn_results}
+\end{figure}
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=0.48\linewidth]{docs/ndn_poc/ieee/fig_ndn_roc_curves.pdf}
+\hfill
+\includegraphics[width=0.48\linewidth]{docs/ndn_poc/ieee/fig_ndn_per_class_accuracy.pdf}
+\caption{NDN PoC ROC curves (left) and per-class accuracy (right).}
+\label{fig:ndn_roc_accuracy}
 \end{figure}
 
 \begin{figure}[!t]

@@ -1,0 +1,196 @@
+{
+  "generated_at": "2026-07-13T19:09:10Z",
+  "dataset": "combined_dataset_v5_final.csv",
+  "split": "v6_sequences TEST (group-disjoint 70/15/15)",
+  "test_sequences": 14219,
+  "benign_test": 814,
+  "attack_test": 13405,
+  "features": 17,
+  "window": 20,
+  "classes": [
+    "BENIGN",
+    "BRUTE_FORCE",
+    "DDOS_HTTP_FLOOD",
+    "DNS_TUNNELING",
+    "PORT_SCAN",
+    "SLOW_HTTP"
+  ],
+  "tier1_gate": {
+    "task": "binary",
+    "positive_class": "ATTACK (escalate)",
+    "n": 14219,
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "specificity": 1.0,
+    "confusion": {
+      "tn": 814,
+      "fp": 0,
+      "fn": 0,
+      "tp": 13405
+    },
+    "role": "Tier-1 Random Forest Gate",
+    "model": "tier1_gate_v6.pkl",
+    "model_size_kb": 154.4,
+    "benign_fpr_percent": 0.0,
+    "threshold_p_benign_allow": 0.9,
+    "roc_auc_attack": 1.0,
+    "note": "Binary task: predict ATTACK (escalate to Tier-2). Benign fast-ALLOW is correct when P(BENIGN)\u22650.90."
+  },
+  "tier2_cnn_gru": {
+    "role": "Tier-2 CNN-GRU (6-class)",
+    "model": "tier2_cnn_gru_v1_r18.pth",
+    "task": "multiclass",
+    "n": 14219,
+    "accuracy": 0.9805,
+    "precision_macro": 0.9859,
+    "recall_macro": 0.985,
+    "f1_macro": 0.9849,
+    "precision_weighted": 0.9819,
+    "recall_weighted": 0.9805,
+    "f1_weighted": 0.9805,
+    "per_class": {
+      "BENIGN": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 814
+      },
+      "BRUTE_FORCE": {
+        "precision": 0.9961,
+        "recall": 0.9139,
+        "f1_score": 0.9532,
+        "support": 3090
+      },
+      "DDOS_HTTP_FLOOD": {
+        "precision": 0.9193,
+        "recall": 0.9964,
+        "f1_score": 0.9563,
+        "support": 3042
+      },
+      "DNS_TUNNELING": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 1364
+      },
+      "PORT_SCAN": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 2906
+      },
+      "SLOW_HTTP": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 3003
+      }
+    },
+    "temperature": 0.7010857462882996,
+    "roc_auc_attack": 1.0,
+    "eval_scope": "All test sequences (standard classifier eval)"
+  },
+  "tier2_escalated_subset": {
+    "n": 13405,
+    "accuracy": 0.9793,
+    "f1_macro": 0.9819,
+    "eval_scope": "Escalated sequences only (post Tier-1)"
+  },
+  "tier3_oneclass": {
+    "task": "binary",
+    "positive_class": "ANOMALY on allow-candidates",
+    "n": 1896,
+    "accuracy": 0.9953,
+    "precision": 0.9918,
+    "recall": 1.0,
+    "f1_score": 0.9959,
+    "specificity": 0.9889,
+    "confusion": {
+      "tn": 805,
+      "fp": 9,
+      "fn": 0,
+      "tp": 1082
+    },
+    "role": "Tier-3 Mahalanobis One-Class",
+    "model": "tier3_oneclass_v6.pkl",
+    "roc_auc_full_test": 1.0,
+    "threshold_maha": 84.5677,
+    "eval_scope_allow_candidates_n": 1896,
+    "benign_false_alarm_percent": 1.11,
+    "attack_detection_percent": 100.0,
+    "note": "Primary Tier-3 metrics on ALLOW-candidates only (production scope). ROC-AUC on full test set for ranking quality. Re-run export_tier3_oneclass.py after any Tier-2 retrain."
+  },
+  "tier3_roc": {
+    "auc": 1.0,
+    "n_points": 4
+  },
+  "cascade_end_to_end": {
+    "task": "binary",
+    "positive_class": "MALICIOUS (BLOCK|FLAG)",
+    "n": 14219,
+    "accuracy": 0.9994,
+    "precision": 0.9993,
+    "recall": 1.0,
+    "f1_score": 0.9997,
+    "specificity": 0.9889,
+    "confusion": {
+      "tn": 805,
+      "fp": 9,
+      "fn": 0,
+      "tp": 13405
+    },
+    "role": "Full 3-Tier Cascade (E2E)",
+    "attack_detection_rate_percent": 100.0,
+    "benign_fpr_percent": 1.11,
+    "eval_script": "measure_cascade_flow.py (equivalent logic)",
+    "note": "E2E security metric: attack=detected if final action is BLOCK or FLAG. Test set: group-disjoint v6_sequences, never seen in training."
+  },
+  "performance": {
+    "Tier-1 Gate": {
+      "latency_avg_ms": 3.6623,
+      "latency_p99_ms": 9.3095,
+      "latency_min_ms": 3.2807,
+      "throughput_pps": 272,
+      "throughput_seq_per_s": 273.1,
+      "benchmark_n": 2000,
+      "hardware": "CPU (single-threaded gate n_jobs=1)"
+    },
+    "Tier-2 ONNX": {
+      "latency_avg_ms": 0.1793,
+      "latency_p99_ms": 0.2949,
+      "latency_min_ms": 0.1719,
+      "throughput_pps": 5570,
+      "throughput_seq_per_s": 5577.2,
+      "benchmark_n": 2000,
+      "hardware": "CPU (single-threaded gate n_jobs=1)"
+    },
+    "Tier-3 One-Class": {
+      "latency_avg_ms": 0.2062,
+      "latency_p99_ms": 0.357,
+      "latency_min_ms": 0.1985,
+      "throughput_pps": 4843,
+      "throughput_seq_per_s": 4849.7,
+      "benchmark_n": 2000,
+      "hardware": "CPU (single-threaded gate n_jobs=1)"
+    },
+    "Full Cascade": {
+      "latency_avg_ms": 4.1945,
+      "latency_p99_ms": 6.4916,
+      "latency_min_ms": 3.8457,
+      "throughput_pps": 238,
+      "throughput_seq_per_s": 238.4,
+      "benchmark_n": 2000,
+      "hardware": "CPU (single-threaded gate n_jobs=1)"
+    },
+    "baseline_g_scaler_ms": 13.0
+  },
+  "methodology_notes": [
+    "All classification metrics on held-out TEST unless stated otherwise.",
+    "Latency: 2000-iteration micro-benchmark, results/r18_latency_benchmark.json.",
+    "Throughput (PPS) = sequences processed per second in benchmark.",
+    "Tier-3 is anomaly detection \u2014 use TPR/FPR/ROC-AUC, not multiclass accuracy.",
+    "Do not report Tier-2 metrics as final production score without cascade E2E."
+  ]
+}

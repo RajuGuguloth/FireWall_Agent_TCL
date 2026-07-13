@@ -1,0 +1,18 @@
+\begin{table}[!t]
+\caption{Hybrid-Sentinel R18 — Standard Evaluation Metrics (Held-Out Test, $n=14{,}219$)}
+\label{tab:submission_metrics}
+\centering
+\small
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Component} & \textbf{Acc.} & \textbf{Prec.} & \textbf{Rec.} & \textbf{F1} & \textbf{Latency (ms)} & \textbf{Throughput} \\
+\midrule
+Tier-1 Gate (binary) & 1.0000 & 1.0000 & 1.0000 & 1.0000 & 3.6623 & 272 seq/s \\
+Tier-2 CNN-GRU (macro) & 0.9805 & 0.9859 & 0.9850 & 0.9849 & 0.1793 & 5570 seq/s \\
+Tier-3 Anomaly & 0.9953 & 0.9918 & 1.0000 & 0.9959 & 0.2062 & 4843 seq/s \\
+Full Cascade (E2E) & 0.9994 & 0.9993 & 1.0000 & 0.9997 & 4.1945 & 238 seq/s \\
+\midrule
+\multicolumn{7}{l}{\textit{E2E: attack detection = 100.0\%, benign FPR = 1.11\%, Tier-3 ROC-AUC = 1.0000} \\
+\bottomrule
+\end{tabular}
+\end{table}

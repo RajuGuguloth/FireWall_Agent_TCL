@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import time
 from datetime import datetime, timezone
@@ -49,8 +50,11 @@ from src.inference.cascade_r18 import CascadeRuntime, gate_summary, load_gate, m
 from src.models.cnn_gru_v6 import CNNGRUClassifier
 
 OUT_DIR = _ROOT / "results" / "submission_figures"
+DOCS_OUT = _ROOT / "docs" / "r18" / "metrics"
 OUT_JSON = _ROOT / "results" / "submission_metrics_r18.json"
+DOCS_JSON = DOCS_OUT / "submission_metrics_r18.json"
 OUT_TEX = _ROOT / "results" / "submission_metrics_table.tex"
+DOCS_TEX = DOCS_OUT / "submission_metrics_table.tex"
 LAT_PATH = _ROOT / "results" / "r18_latency_benchmark.json"
 
 plt.rcParams.update({
@@ -108,10 +112,13 @@ def annotate_bars(ax, bars, values, fmt="{:.2f}", y_pad=0.012, fontsize=7):
 
 def save(fig, name: str):
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    DOCS_OUT.mkdir(parents=True, exist_ok=True)
     for ext in ("pdf", "png"):
-        fig.savefig(OUT_DIR / f"{name}.{ext}", facecolor="white")
+        path = OUT_DIR / f"{name}.{ext}"
+        fig.savefig(path, facecolor="white")
+        shutil.copy2(path, DOCS_OUT / f"{name}.{ext}")
     plt.close(fig)
-    print(f"  saved {name}.pdf/.png")
+    print(f"  saved {name}.pdf/.png -> results/ + docs/r18/metrics/")
 
 
 def bin_metrics(y_true, y_pred, positive_label: str = "positive") -> dict:
@@ -169,6 +176,9 @@ def compute_all_metrics() -> dict:
     tier1["model_size_kb"] = round(os.path.getsize(cfg.TIER1_GATE) / 1024, 1)
     tier1["benign_fpr_percent"] = round(100 * tier1["confusion"]["fp"] / (814), 2)
     tier1["threshold_p_benign_allow"] = cfg.GATE_THRESHOLD
+    tier1_fpr, tier1_tpr, _ = roc_curve(y_attack, 1.0 - p_ben)
+    tier1_roc_auc = float(auc(tier1_fpr, tier1_tpr))
+    tier1["roc_auc_attack"] = round(tier1_roc_auc, 4)
     tier1["note"] = (
         "Binary task: predict ATTACK (escalate to Tier-2). "
         "Benign fast-ALLOW is correct when P(BENIGN)≥0.90."
@@ -179,11 +189,16 @@ def compute_all_metrics() -> dict:
     model.load_state_dict(torch.load(cfg.TIER2_PTH, map_location="cpu"))
     model.eval()
     preds = []
+    probs_all = np.zeros((n, len(classes)), np.float32)
     with torch.no_grad():
         for i in range(0, n, 512):
             lg = model(torch.FloatTensor(Xte[i : i + 512])) / T
-            preds.extend(torch.softmax(lg, 1).argmax(1).numpy())
+            batch_probs = torch.softmax(lg, 1).numpy()
+            probs_all[i : i + 512] = batch_probs
+            preds.extend(batch_probs.argmax(1))
     preds = np.array(preds)
+    tier2_fpr, tier2_tpr, _ = roc_curve(y_attack, 1.0 - probs_all[:, B])
+    tier2_roc_auc = float(auc(tier2_fpr, tier2_tpr))
 
     report = classification_report(yte, preds, target_names=classes, output_dict=True, zero_division=0)
     per_class = {
@@ -209,6 +224,7 @@ def compute_all_metrics() -> dict:
         "f1_weighted": round(float(f1_score(yte, preds, average="weighted", zero_division=0)), 4),
         "per_class": per_class,
         "temperature": T,
+        "roc_auc_attack": round(tier2_roc_auc, 4),
         "eval_scope": "All test sequences (standard classifier eval)",
     }
 
@@ -357,6 +373,8 @@ def compute_all_metrics() -> dict:
             "Do not report Tier-2 metrics as final production score without cascade E2E.",
         ],
         "_roc_arrays": tier3_roc,
+        "_tier1_roc": {"fpr": tier1_fpr.tolist(), "tpr": tier1_tpr.tolist()},
+        "_tier2_roc": {"fpr": tier2_fpr.tolist(), "tpr": tier2_tpr.tolist()},
         "_cm_tier2": confusion_matrix(yte, preds).tolist(),
         "_classes": classes,
     }
@@ -510,6 +528,42 @@ def fig_tier2_confusion(cm: list, classes: list):
     save(fig, "fig_submission_tier2_confusion_matrix")
 
 
+# ── Plot: Tier-1 ROC ─────────────────────────────────────────────────────
+def fig_tier1_roc(m: dict, roc: dict):
+    fpr = np.array(roc["fpr"])
+    tpr = np.array(roc["tpr"])
+    fig, ax = plt.subplots(figsize=(4.8, 3.8), facecolor="white")
+    ax.plot(fpr, tpr, color=C_NAVY, lw=2,
+            label=f"Tier-1 Gate (AUC={m['tier1_gate'].get('roc_auc_attack', 0):.4f})")
+    ax.plot([0, 1], [0, 1], "--", color=C_GREY, lw=1, label="Random baseline")
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+    ax.set_title("Tier-1 Attack Detection ROC")
+    ax.legend(fontsize=8, loc="lower right", frameon=False)
+    style_axes(ax, grid_axis="both")
+    ax.set_xlim(-0.02, 1.02)
+    ax.set_ylim(-0.02, 1.02)
+    save(fig, "fig_submission_tier1_roc_curve")
+
+
+# ── Plot: Tier-2 ROC ─────────────────────────────────────────────────────
+def fig_tier2_roc(m: dict, roc: dict):
+    fpr = np.array(roc["fpr"])
+    tpr = np.array(roc["tpr"])
+    fig, ax = plt.subplots(figsize=(4.8, 3.8), facecolor="white")
+    ax.plot(fpr, tpr, color=C_ORANGE, lw=2,
+            label=f"Tier-2 CNN-GRU (AUC={m['tier2_cnn_gru'].get('roc_auc_attack', 0):.4f})")
+    ax.plot([0, 1], [0, 1], "--", color=C_GREY, lw=1, label="Random baseline")
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+    ax.set_title("Tier-2 Attack Detection ROC")
+    ax.legend(fontsize=8, loc="lower right", frameon=False)
+    style_axes(ax, grid_axis="both")
+    ax.set_xlim(-0.02, 1.02)
+    ax.set_ylim(-0.02, 1.02)
+    save(fig, "fig_submission_tier2_roc_curve")
+
+
 # ── Plot: Tier-3 ROC ─────────────────────────────────────────────────────
 def fig_tier3_roc(m: dict, roc: dict):
     fpr = np.array(roc["fpr"])
@@ -659,7 +713,9 @@ def write_latex_table(m: dict):
 \end{table}
 """
     OUT_TEX.write_text(tex)
-    print(f"  saved {OUT_TEX}")
+    DOCS_OUT.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(OUT_TEX, DOCS_TEX)
+    print(f"  saved {OUT_TEX} + docs copy")
 
 
 def main():
@@ -671,10 +727,14 @@ def main():
 
     # Strip large arrays from JSON
     roc = m.pop("_roc_arrays")
+    tier1_roc = m.pop("_tier1_roc")
+    tier2_roc = m.pop("_tier2_roc")
     cm = m.pop("_cm_tier2")
     classes = m.pop("_classes")
     OUT_JSON.write_text(json.dumps(m, indent=2))
-    print(f"  saved {OUT_JSON}")
+    DOCS_OUT.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(OUT_JSON, DOCS_JSON)
+    print(f"  saved {OUT_JSON} + {DOCS_JSON}")
 
     print("\nGenerating figures ...")
     fig_summary_table(m)
@@ -682,6 +742,8 @@ def main():
     fig_tier2_heatmap(m, cm, classes)
     fig_tier1_confusion(m)
     fig_tier2_confusion(cm, classes)
+    fig_tier1_roc(m, tier1_roc)
+    fig_tier2_roc(m, tier2_roc)
     fig_tier3_roc(m, roc)
     fig_latency_throughput(m)
     fig_e2e_security(m)
@@ -689,6 +751,7 @@ def main():
 
     print(f"\nDone in {time.time() - t0:.1f}s")
     print(f"Figures: {OUT_DIR}")
+    print(f"Docs copy: {DOCS_OUT}")
     print("\nKey E2E results:")
     ce = m["cascade_end_to_end"]
     print(f"  Attack detection: {ce['attack_detection_rate_percent']}%")
