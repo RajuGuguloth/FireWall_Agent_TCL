@@ -144,27 +144,37 @@ def fig_confusion_matrix(m: dict) -> None:
     row_sum = cm.sum(axis=1, keepdims=True)
     cm_norm = np.divide(cm, row_sum, where=row_sum > 0)
 
-    fig, ax = plt.subplots(figsize=(3.5, 3.0))
-    im = ax.imshow(cm_norm, cmap="Blues", vmin=0, vmax=1)
+    # Single-column IEEE: large cell text, short title
+    fig, ax = plt.subplots(figsize=(3.35, 3.20))
+    im = ax.imshow(cm_norm, cmap="Blues", vmin=0, vmax=1, aspect="equal")
     short = [lb.replace("_", "\n") for lb in labels]
     ax.set_xticks(range(len(labels)))
     ax.set_yticks(range(len(labels)))
-    ax.set_xticklabels(short, fontsize=7)
-    ax.set_yticklabels(short, fontsize=7)
-    ax.set_xlabel("Predicted label")
-    ax.set_ylabel("True label")
-    ax.set_title("NDN PoC — Normalized Confusion Matrix (held-out)")
+    ax.set_xticklabels(short, fontsize=8, linespacing=0.95)
+    ax.set_yticklabels(short, fontsize=8, linespacing=0.95)
+    ax.set_xlabel("Predicted label", fontsize=9)
+    ax.set_ylabel("True label", fontsize=9)
+    ax.set_title("NDN Confusion Matrix (held-out)", fontsize=10, fontweight="bold", color=C_NAVY)
 
-    thresh = 0.5
+    ax.set_xticks(np.arange(-0.5, len(labels), 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, len(labels), 1), minor=True)
+    ax.grid(which="minor", color="white", linestyle="-", linewidth=1.4)
+    ax.tick_params(which="minor", bottom=False, left=False)
+
     for i in range(cm.shape[0]):
         for j in range(cm.shape[1]):
-            txt = f"{int(cm[i, j])}\n({cm_norm[i, j]:.2f})"
+            v = cm_norm[i, j]
+            txt = f"{v:.2f}\n({int(cm[i, j]):,})"
             ax.text(
-                j, i, txt, ha="center", va="center", fontsize=6.5,
-                color="white" if cm_norm[i, j] > thresh else "black",
+                j, i, txt, ha="center", va="center", fontsize=9,
+                fontweight="bold", linespacing=1.15,
+                color="white" if v >= 0.5 else C_NAVY,
             )
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    cbar.set_label("Recall (row-normalized)", fontsize=7)
+    cbar.set_label("Recall (row-norm.)", fontsize=8)
+    cbar.ax.tick_params(labelsize=7)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
     fig.tight_layout()
     _save(fig, "fig_ndn_confusion_matrix")
 
@@ -215,31 +225,56 @@ def fig_summary_bars(m: dict) -> None:
 
 
 def fig_architecture() -> None:
-    """NDN simulator topology for IEEE — single monitored router."""
-    fig, ax = plt.subplots(figsize=(3.5, 2.2))
+    """NDN simulator topology for IEEE — single monitored router (no clipped labels)."""
+    fig, ax = plt.subplots(figsize=(3.6, 2.8))
     ax.set_xlim(0, 10)
-    ax.set_ylim(0, 6)
+    ax.set_ylim(0, 7.2)
     ax.axis("off")
-    ax.set_title("NDN PoC — Simulated Forwarder Topology")
+    ax.set_title("NDN PoC — Simulated Forwarder Topology", pad=8)
 
-    def box(x, y, w, h, text, color):
+    def box(x, y, w, h, text, color, fs=6.5):
         p = FancyBboxPatch(
             (x, y), w, h, boxstyle="round,pad=0.02,rounding_size=0.08",
             facecolor=color, edgecolor=C_NAVY, linewidth=0.8,
         )
         ax.add_patch(p)
-        ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=7, color="white", fontweight="bold")
+        ax.text(
+            x + w / 2, y + h / 2, text, ha="center", va="center",
+            fontsize=fs, color="white", fontweight="bold", linespacing=1.2,
+        )
 
-    box(0.3, 2.2, 1.8, 1.2, "Benign\nconsumers", C_GREEN)
-    box(0.3, 0.5, 1.8, 1.2, "Attackers\n(Flood / Pollute)", C_RED)
-    box(3.8, 1.2, 2.4, 2.4, "Monitored\nrouter R\nPIT + CS", C_NAVY)
-    box(7.2, 1.6, 2.2, 1.6, "Content\nproducer", C_TEAL)
+    box(0.25, 4.5, 2.2, 1.5, "Benign\nconsumers\n(Zipf)", C_GREEN, fs=6.8)
+    box(0.25, 2.2, 2.2, 1.7, "Attackers\nInterest Flood\nCache Pollution", C_RED, fs=6.2)
+    box(3.6, 2.6, 2.8, 2.8, "Monitored\nrouter R\nPIT + CS", C_NAVY, fs=7.5)
+    box(7.3, 3.1, 2.3, 1.8, "Content\nproducer", C_TEAL, fs=7.0)
 
-    for y0 in (2.8, 1.1):
-        ax.add_patch(FancyArrowPatch((2.1, y0), (3.8, 2.4), arrowstyle="->", color=C_GREY, lw=1.0))
-    ax.add_patch(FancyArrowPatch((6.2, 2.4), (7.2, 2.4), arrowstyle="->", color=C_GREY, lw=1.0))
+    # Interest arrows (consumers / attackers → router)
+    ax.add_patch(FancyArrowPatch((2.45, 5.25), (3.6, 4.5), arrowstyle="-|>",
+                                 mutation_scale=9, color=C_GREEN, lw=1.1))
+    ax.add_patch(FancyArrowPatch((2.45, 3.0), (3.6, 3.6), arrowstyle="-|>",
+                                 mutation_scale=9, color=C_RED, lw=1.1))
+    ax.text(2.9, 5.55, "Interest", fontsize=5.5, color=C_GREEN, ha="center")
+    ax.text(2.9, 2.55, "Interest", fontsize=5.5, color=C_RED, ha="center")
 
-    ax.text(5.0, 0.35, "17 NDN-native features → 20-packet windows → RF classifier", ha="center", fontsize=7, color=C_NAVY)
+    # Router ↔ producer (Interest out / Data back)
+    ax.add_patch(FancyArrowPatch((6.4, 4.35), (7.3, 4.35), arrowstyle="-|>",
+                                 mutation_scale=9, color=C_GREY, lw=1.1))
+    ax.add_patch(FancyArrowPatch((7.3, 3.7), (6.4, 3.7), arrowstyle="-|>",
+                                 mutation_scale=9, color=C_BLUE, lw=1.1))
+    ax.text(6.85, 4.55, "Interest", fontsize=5.2, color=C_GREY, ha="center")
+    ax.text(6.85, 3.45, "Data", fontsize=5.2, color=C_BLUE, ha="center")
+
+    # Footer clear of boxes
+    ax.text(
+        5.0, 0.85,
+        "17 NDN-native features → 20-packet windows → RF classifier",
+        ha="center", va="center", fontsize=6.5, color=C_NAVY,
+    )
+    ax.text(
+        5.0, 0.35,
+        "Observation point: PIT / CS state at router R (simulation, not live NFD)",
+        ha="center", va="center", fontsize=5.8, color=C_GREY, fontstyle="italic",
+    )
     fig.tight_layout()
     _save(fig, "fig_ndn_architecture")
 

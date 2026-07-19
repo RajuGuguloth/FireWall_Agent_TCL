@@ -508,23 +508,41 @@ def fig_tier1_confusion(m: dict):
 def fig_tier2_confusion(cm: list, classes: list):
     cm_arr = np.array(cm)
     cm_norm = cm_arr.astype(float) / cm_arr.sum(axis=1, keepdims=True)
-    fig, ax = plt.subplots(figsize=(5.4, 4.4), facecolor="white")
-    im = ax.imshow(cm_norm, cmap="Blues", vmin=0, vmax=1)
+    # Single-column IEEE (~3.4 in): large normalized values only
+    fig, ax = plt.subplots(figsize=(3.40, 3.35), facecolor="white")
+    im = ax.imshow(cm_norm, cmap="Blues", vmin=0, vmax=1, aspect="equal")
+    short = {
+        "BENIGN": "BENIGN",
+        "BRUTE_FORCE": "BRUTE\nFORCE",
+        "DDOS_HTTP_FLOOD": "DDOS\nHTTP",
+        "DNS_TUNNELING": "DNS\nTUNNEL",
+        "PORT_SCAN": "PORT\nSCAN",
+        "SLOW_HTTP": "SLOW\nHTTP",
+    }
+    labels = [short.get(c, c.replace("_", "\n")) for c in classes]
     ax.set_xticks(range(len(classes)))
     ax.set_yticks(range(len(classes)))
-    ax.set_xticklabels([c.replace("_", "\n") for c in classes], rotation=0, ha="center", fontsize=7)
-    ax.set_yticklabels([c.replace("_", "\n") for c in classes], fontsize=7)
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("True")
+    ax.set_xticklabels(labels, rotation=0, ha="center", fontsize=7, linespacing=0.95)
+    ax.set_yticklabels(labels, fontsize=7, linespacing=0.95)
+    ax.set_xlabel("Predicted label", fontsize=9)
+    ax.set_ylabel("True label", fontsize=9)
+    ax.set_xticks(np.arange(-0.5, len(classes), 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, len(classes), 1), minor=True)
+    ax.grid(which="minor", color="white", linestyle="-", linewidth=1.3)
+    ax.tick_params(which="minor", bottom=False, left=False)
     for i in range(len(classes)):
         for j in range(len(classes)):
             val = cm_norm[i, j]
-            ax.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=7,
-                    color="white" if val > 0.55 else "#1F2937")
-    ax.set_title("Tier-2 Confusion Matrix")
+            ax.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=9,
+                    fontweight="bold",
+                    color="white" if val >= 0.50 else "#1B2A4A")
+    ax.set_title("Tier-2 Confusion Matrix", fontsize=10, fontweight="bold", color="#1B2A4A")
     for spine in ax.spines.values():
         spine.set_visible(False)
-    plt.colorbar(im, ax=ax, shrink=0.72, pad=0.03)
+    cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label("Recall (row-norm.)", fontsize=8)
+    cbar.ax.tick_params(labelsize=7)
+    fig.tight_layout()
     save(fig, "fig_submission_tier2_confusion_matrix")
 
 
