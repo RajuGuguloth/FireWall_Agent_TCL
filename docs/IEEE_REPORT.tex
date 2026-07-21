@@ -1,4 +1,8 @@
-\documentclass[conference]{IEEEtran}
+% ======================================================================
+%  Hybrid-Sentinel IEEE Conference Paper (section-wise figures)
+%  Every figure is introduced in body text: what it shows + what it means
+% ======================================================================
+\documentclass[10pt,conference]{IEEEtran}
 
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
@@ -7,253 +11,593 @@
 \usepackage{url}
 \usepackage[hidelinks]{hyperref}
 \usepackage{multirow}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{placeins}   % \FloatBarrier keeps figures inside their section
+
+\captionsetup{font=footnotesize, labelfont=bf, skip=4pt}
+\captionsetup[sub]{font=scriptsize, labelfont=normalfont, skip=2pt}
+
+\makeatletter
+\setlength{\@fptop}{0pt}
+\makeatother
 
 \begin{document}
 
-\title{Hybrid-Sentinel: A Three-Tier Confidence-Gated AI Firewall for NDN Edge Deployment}
+\title{Hybrid-Sentinel: A Three-Tier Confidence-Gated AI Firewall
+       for NDN Edge Deployment}
 
-\author{
-\IEEEauthorblockN{Raju Guguloth}
-\IEEEauthorblockA{Indian Institute of Technology Madras\\
-M.Tech Research --- TCL Collaboration\\
-Email: \texttt{[your.email@iitm.ac.in]}}
+\author{%
+  \IEEEauthorblockN{Raju Guguloth}
+  \IEEEauthorblockA{Indian Institute of Technology Madras\\
+    M.Tech Research --- TCL Collaboration\\
+    \texttt{[your.email@iitm.ac.in]}}
 }
 
 \maketitle
 
+% ======================================================================
 \begin{abstract}
-Signature-based intrusion detection systems such as Snort remain the backbone of network defense, yet their reliance on static, hand-maintained rule sets leaves them blind to novel attacks, prone to false alarms, and ill-suited to Named Data Networking (NDN) edge routers that forward discrete Interest/Data units rather than IP flows. This paper presents \textit{Hybrid-Sentinel}, a confidence-gated behavioural firewall that inspects 20-packet windows of 17 features and emits auditable \texttt{ALLOW}, \texttt{FLAG}, or \texttt{BLOCK} decisions. We evaluate the same methodological pattern on two complementary tracks. Track~A is a production three-tier cascade on Docker IP lab traffic: a 156\,KB Random Forest gate, a temperature-calibrated CNN-GRU (ONNX) over six attack classes, and a Mahalanobis one-class detector for zero-day novelty---achieving 100\% attack detection, 1.11\% benign false-positive rate, and 4.19\,ms mean CPU latency on 14{,}219 held-out sequences. Track~B is an NDN forwarder proof-of-concept that observes Pending Interest Table (PIT) and Content Store (CS) state to detect Interest Flooding and Cache Pollution, reaching 0.995 macro-F1 and 0.67\% benign FPR on 51{,}656 held-out windows. Together, the results show that a staged, learning-based design can outperform static signature engines on both IP-style behaviours and NDN-native attacks, while remaining explainable for edge operation.
+Signature-based intrusion detection systems such as Snort remain the
+backbone of network defense, yet their reliance on static,
+hand-maintained rule sets leaves them blind to novel attacks, prone to
+false alarms, and ill-suited to Named Data Networking (NDN) edge routers
+that forward discrete Interest/Data units rather than IP flows.
+This paper presents \textit{Hybrid-Sentinel}, a confidence-gated
+behavioural firewall that inspects 20-packet windows of 17 features and
+emits auditable \texttt{ALLOW}, \texttt{FLAG}, or \texttt{BLOCK}
+decisions. We evaluate the same methodological pattern on two
+complementary tracks. Track~A is a production three-tier cascade on
+Docker IP lab traffic: a 156\,KB Random Forest gate, a
+temperature-calibrated CNN-GRU (ONNX) over six attack classes, and a
+Mahalanobis one-class detector for zero-day novelty---achieving 100\%
+attack detection, 1.11\% benign false-positive rate, and 4.19\,ms mean
+CPU latency on 14{,}219 held-out sequences. Track~B is an NDN forwarder
+proof-of-concept that observes Pending Interest Table (PIT) and Content
+Store (CS) state to detect Interest Flooding and Cache Pollution,
+reaching 0.995 macro-F1 and 0.67\% benign FPR on 51{,}656 held-out
+windows. Together, the results show that a staged, learning-based design
+can outperform static signature engines on both IP-style behaviours and
+NDN-native attacks, while remaining explainable for edge operation.
 \end{abstract}
 
 \begin{IEEEkeywords}
-Named Data Networking, intrusion detection, Snort, cascade classifier, Interest Flooding, Cache Pollution, ONNX, anomaly detection
+Named Data Networking, intrusion detection, Snort, cascade classifier,
+Interest Flooding, Cache Pollution, ONNX, anomaly detection
 \end{IEEEkeywords}
 
-%----------------------------------------------------------------------
+% ======================================================================
 \section{Introduction}
 \label{sec:intro}
 
-Classical network intrusion detection is dominated by signature engines such as Snort and Suricata. These systems are fast at matching known patterns, but they fail when payloads are obfuscated, when attacks are novel, or when the protocol surface changes---problems that become acute at the NDN edge, where adversaries target forwarder state (Pending Interest Table exhaustion, Content Store pollution) rather than TCP/IP headers alone~\cite{ndn,afiha}. Deep learning detectors improve coverage, yet running a heavyweight model on every packet rarely fits a router latency budget.
+Classical network intrusion detection is dominated by signature engines
+such as Snort and Suricata. These systems are fast at matching known
+patterns, but they fail when payloads are obfuscated, when attacks are
+novel, or when the protocol surface changes---problems that become acute
+at the NDN edge, where adversaries target forwarder state (Pending
+Interest Table exhaustion, Content Store pollution) rather than TCP/IP
+headers alone~\cite{ndn,afiha}. Deep learning detectors improve
+coverage, yet running a heavyweight model on every packet rarely fits a
+router latency budget.
 
-Named Data Networking routes on content names and naturally inspects discrete Interest and Data packets at each hop~\cite{ndn}. This motivates a \emph{hybrid} firewall: a cheap gate on most traffic and a deeper model only when suspicion rises~\cite{tcl-wiki}. Hybrid-Sentinel implements that pattern and validates it on two tracks without conflating their evidence:
+Named Data Networking routes on content names and naturally inspects
+discrete Interest and Data packets at each hop~\cite{ndn}. This
+motivates a \emph{hybrid} firewall: a cheap gate on most traffic and a
+deeper model only when suspicion rises~\cite{tcl-wiki}.
+Hybrid-Sentinel implements that pattern and validates it on two tracks
+without conflating their evidence:
 \begin{itemize}
-\item \textbf{Track A (R18 production):} a three-tier cascade trained on controlled Docker TCP/IP PCAPs (brute force, HTTP flood, slow HTTP, port scan, DNS tunneling).
-\item \textbf{Track B (NDN PoC):} the same behavioural-window idea applied to NDN-native features extracted from a simulated PIT+CS forwarder under Interest Flooding and Cache Pollution.
+  \item \textbf{Track A (R18 production):} a three-tier cascade trained
+        on controlled Docker TCP/IP PCAPs (brute force, HTTP flood, slow
+        HTTP, port scan, DNS tunneling).
+  \item \textbf{Track B (NDN PoC):} the same behavioural-window idea
+        applied to NDN-native features extracted from a simulated PIT+CS
+        forwarder under Interest Flooding and Cache Pollution.
 \end{itemize}
 
 \paragraph{Contributions.}
-(1)~A confidence-gated three-tier cascade with shared feature contract, ONNX deployment, and per-tier audit traces. (2)~Honest dual evaluation: IP lab cascade metrics plus transferable NDN-native detection of Interest Flooding and Cache Pollution. (3)~A reproducible build path from PCAP/simulation to FastAPI service suitable for edge research deployment.
+(1)~A confidence-gated three-tier cascade with shared feature contract,
+ONNX deployment, and per-tier audit traces. (2)~Honest dual evaluation:
+IP lab cascade metrics plus transferable NDN-native detection of Interest
+Flooding and Cache Pollution. (3)~A reproducible build path from
+PCAP/simulation to FastAPI service suitable for edge research deployment.
 
-%----------------------------------------------------------------------
+% ======================================================================
 \section{Related Work}
 \label{sec:related}
 
-Snort-style IDS relies on deterministic pattern matching and continuous rule maintenance; zero-day and protocol-native NDN attacks fall outside typical IP signature libraries~\cite{afiha}. Flow-based CNN/RNN IDS on public IP datasets (e.g., CIC-IDS) demonstrates deep models on packet sequences~\cite{cicids} but does not address NDN forwarder state. Prior NDN security work studies Interest Flooding against the PIT and pollution against the CS~\cite{afiha,compagno}. Our contribution is a \emph{confidence-gated cascade} for production IP behaviours, plus a PoC showing that windowed behavioural features transfer to NDN state observations---without claiming the IP models were trained on NDN packets.
+Snort-style IDS relies on deterministic pattern matching and continuous
+rule maintenance; zero-day and protocol-native NDN attacks fall outside
+typical IP signature libraries~\cite{afiha}. Flow-based CNN/RNN IDS on
+public IP datasets (e.g., CIC-IDS) demonstrates deep models on packet
+sequences~\cite{cicids} but does not address NDN forwarder state. Prior
+NDN security work studies Interest Flooding against the PIT and
+pollution against the CS~\cite{afiha,compagno}. Our contribution is a
+\emph{confidence-gated cascade} for production IP behaviours, plus a
+PoC showing that windowed behavioural features transfer to NDN state
+observations---without claiming the IP models were trained on NDN
+packets.
 
-%----------------------------------------------------------------------
+\FloatBarrier
+% ======================================================================
 \section{System Architecture}
 \label{sec:system}
 
-Fig.~\ref{fig:unified} summarises the dual-track design. Both tracks share a detection method---17 features organised as 20-packet windows feeding a confidence-aware classifier---but differ in feature semantics and model stack.
+\subsection{Dual-Track Overview}
+
+Fig.~\ref{fig:unified} is the master map of Hybrid-Sentinel. Reading
+top to bottom, it conveys four messages: (1)~NDN edge routers inspect
+Interest/Data units and maintain PIT/CS state, which signature engines
+such as Snort were not designed to protect; (2)~the design choice is a
+\emph{cheap gate on most traffic} and deeper ML only on suspicion, with
+auditable \texttt{ALLOW}/\texttt{FLAG}/\texttt{BLOCK} actions; (3)~both
+tracks share the same methodological contract---17 behavioural features
+organised as 20-packet windows; (4)~Track~A (left) is the production
+IP cascade (Random Forest $\rightarrow$ CNN-GRU $\rightarrow$
+Mahalanobis), while Track~B (right) instantiates the same window idea
+on NDN-native PIT/CS features for Interest Flooding and Cache Pollution.
+The figure therefore makes the honesty claim explicit: the
+\emph{method} is shared; the \emph{trained models and feature semantics}
+are track-specific.
 
 \begin{figure*}[!t]
-\centering
-\includegraphics[width=\textwidth]{figures/fig_unified_system_architecture.pdf}
-\caption{Hybrid-Sentinel dual-track architecture. Track~A is the R18 production cascade on IP lab PCAPs. Track~B transfers the same windowed methodology to NDN PIT/CS observations (simulation).}
-\label{fig:unified}
+  \centering
+  \includegraphics[width=\textwidth]{figures/fig_unified_system_architecture.pdf}
+  \caption{Dual-track Hybrid-Sentinel architecture (full page width).
+    Top: NDN motivation vs.\ Snort limitations and hybrid design choice.
+    Middle: shared 17-feature / 20-packet detection contract.
+    Bottom-left: Track~A R18 cascade on IP lab traffic.
+    Bottom-right: Track~B NDN forwarder PoC on PIT/CS state.}
+  \label{fig:unified}
 \end{figure*}
 
-\subsection{Track A: R18 runtime cascade}
-Each decision uses a scaled window $\mathbf{X} \in \mathbb{R}^{20 \times 17}$. Tier-1 summarises the window (mean, standard deviation, last packet) and estimates $P(\text{BENIGN})$; above $\tau_1{=}0.90$ the window is \texttt{ALLOW}ed without deep inference. Otherwise Tier-2 (CNN-GRU, temperature-scaled) assigns one of six labels; confidence above $\tau_b{=}0.95$ yields \texttt{BLOCK}, and $[\tau_f,\tau_b)$ with $\tau_f{=}0.80$ yields \texttt{FLAG}. Tier-3 scores Mahalanobis distance on a 128-D embedding and may \texttt{FLAG} residual novelty as \texttt{ANOMALY}. Fig.~\ref{fig:arch} details the decision flow; Fig.~\ref{fig:orch} shows build orchestration from capture through ONNX export to the FastAPI service.
+\subsection{Track A: Runtime Cascade and Build Pipeline}
+
+Each Track~A decision uses a scaled window
+$\mathbf{X}\in\mathbb{R}^{20\times 17}$. Tier-1 estimates
+$P(\text{BENIGN})$; above $\tau_1{=}0.90$ the window is \texttt{ALLOW}ed
+without deep inference. Otherwise Tier-2 (CNN-GRU, temperature-scaled)
+assigns one of six labels; confidence above $\tau_b{=}0.95$ yields
+\texttt{BLOCK}, and $[\tau_f,\tau_b)$ with $\tau_f{=}0.80$ yields
+\texttt{FLAG}. Tier-3 scores Mahalanobis distance on a 128-D embedding
+and may \texttt{FLAG} residual novelty as \texttt{ANOMALY}.
+
+Fig.~\ref{fig:arch} conveys the \emph{runtime} decision path for one
+window. The top box is the input contract. The diamond after Tier-1 is
+the confidence gate: high benign probability exits immediately as
+\texttt{ALLOW} (green), which keeps clean traffic cheap. The orange
+escalate path enters Tier-2, where calibrated class probabilities become
+operational actions. Tier-3 only acts on residual uncertainty, flagging
+embedding outliers without inventing an attack class name. The bottom
+box emphasises that every path ends in one of three auditable actions
+for SOC review.
 
 \begin{figure}[!t]
-\centering
-\includegraphics[width=\columnwidth]{figures/architecture_flow.pdf}
-\caption{Track~A runtime three-tier decision flow. Fast-path \texttt{ALLOW} skips deep inference when Tier-1 benign confidence is high.}
-\label{fig:arch}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/architecture_flow.pdf}
+  \caption{Track~A runtime cascade. What it conveys: Tier-1 fast
+    \texttt{ALLOW} when $P(\text{BENIGN})\ge 0.90$; escalated windows
+    reach Tier-2 (six-class ONNX) then optional Tier-3 novelty
+    \texttt{FLAG}; final action is always \texttt{ALLOW}, \texttt{FLAG},
+    or \texttt{BLOCK}.}
+  \label{fig:arch}
 \end{figure}
+
+Fig.~\ref{fig:orch} conveys the \emph{build} story, not packet scoring.
+Left-to-right stages show PCAP capture $\rightarrow$ 17-feature
+extraction $\rightarrow$ 20-packet windows $\rightarrow$ three-tier
+training. The middle row shows ONNX export, Tier-3 calibration, and the
+single cascade module shared by offline evaluation and the live API.
+The bottom row mirrors runtime tiers and final actions. This figure is
+the reproducibility map: any retrain must regenerate the same export
+chain so evaluation and serving cannot drift.
 
 \begin{figure}[!t]
-\centering
-\includegraphics[width=\columnwidth]{figures/orchestration_pipeline.pdf}
-\caption{Track~A build orchestration: capture, feature extraction, training, ONNX export, unified cascade, API.}
-\label{fig:orch}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/orchestration_pipeline.pdf}
+  \caption{Track~A build orchestration. What it conveys: how lab PCAPs
+    become exported ONNX/cascade artifacts and a FastAPI service with
+    one shared decision logic.}
+  \label{fig:orch}
 \end{figure}
 
-\subsection{Track B: NDN forwarder PoC}
-Fig.~\ref{fig:ndn_topo} shows the simulated topology. Benign consumers issue Zipf-popular Interests; attackers inject unsatisfiable names (Interest Flooding $\rightarrow$ PIT exhaustion) or cold catalog names (Cache Pollution $\rightarrow$ CS hit-ratio collapse). The observation point is router~$R$ (PIT+CS). Seventeen NDN-native features (e.g., PIT size growth, CS hit ratio, name entropy, unsatisfied Interest ratio) form 20-packet windows classified as \texttt{BENIGN}, \texttt{INTEREST\_FLOODING}, or \texttt{CACHE\_POLLUTION}.
+\subsection{Track B: NDN Forwarder Topology}
+
+Fig.~\ref{fig:ndn_topo} conveys the NDN experiment setup. Green benign
+consumers issue Zipf-popular, satisfiable Interests. Red attackers inject
+either unsatisfiable unique names (Interest Flooding $\rightarrow$ PIT
+exhaustion) or cold but valid names (Cache Pollution $\rightarrow$ CS
+hit-ratio collapse). Router~$R$ is the observation point: PIT/CS
+counters, name entropy, and unsatisfied-Interest ratios are logged
+causally. Interests leave~$R$ toward the producer and Data returns on
+the reverse path. The footer states the PoC pipeline---17 NDN-native
+features $\rightarrow$ 20-packet windows $\rightarrow$ Random Forest---
+and reminds the reader this is a discrete-event simulation, not a live
+NFD capture.
 
 \begin{figure}[!t]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig_ndn_architecture.pdf}
-\caption{Track~B simulated NDN topology. Interest/Data exchange is observed at router~$R$ (PIT + Content Store); this is a discrete-event simulation, not a live NFD testbed.}
-\label{fig:ndn_topo}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/fig_ndn_architecture.pdf}
+  \caption{Track~B NDN topology. What it conveys: where Interests/Data
+    flow, why router~$R$ (PIT+CS) is monitored, and how windows feed the
+    NDN classifier (simulation, not live NFD).}
+  \label{fig:ndn_topo}
 \end{figure}
 
-%----------------------------------------------------------------------
+\FloatBarrier
+% ======================================================================
 \section{Methodology}
 \label{sec:method}
 
-\subsection{Track A features and training}
-Seventeen packet-level IP features (length, protocol flags, payload entropy, flow aggregates) are extracted with Scapy. Sliding windows of size 20 (stride 10) form sequences. Sequences are grouped by pseudo-flow blocks; train/validation/test splits are 70/15/15 with zero group overlap. The scaler is fit on training data only. Tier-2 uses focal loss with elevated benign weight and temperature calibration on validation. Tier-3 is fit on benign training embeddings and must be re-exported when Tier-2 weights change. Tier-2 inference uses ONNX Runtime on CPU; cascade logic lives in a single module shared by evaluation and the API.
+\subsection{Track A Features and Training}
 
-\subsection{Track B NDN features}
-NDN features deliberately parallel the production 17-dimensional contract but read forwarder state: Interest/Data indicators, name depth and entropy, PIT occupancy and growth, CS size and hit signals, interarrival and windowed rates. Features are causal (past observations only), so the extractor is conceptually deployable on a live forwarder. A Random Forest classifier is trained with a stratified 75/25 train/test split on simulated windows.
+Seventeen packet-level IP features (length, protocol flags, payload
+entropy, flow aggregates) are extracted with Scapy. Sliding windows of
+size 20 (stride 10) form sequences. Sequences are grouped by
+pseudo-flow blocks; train/validation/test splits are 70/15/15 with zero
+group overlap. The scaler is fit on training data only. Tier-2 uses
+focal loss with elevated benign weight and temperature calibration on
+validation. Tier-3 is fit on benign training embeddings and must be
+re-exported when Tier-2 weights change. Tier-2 inference uses ONNX
+Runtime on CPU; cascade logic lives in a single module shared by
+evaluation and the API.
 
-%----------------------------------------------------------------------
+\subsection{Track B NDN Features}
+
+NDN features deliberately parallel the production 17-dimensional
+contract but read forwarder state: Interest/Data indicators, name depth
+and entropy, PIT occupancy and growth, CS size and hit signals,
+interarrival and windowed rates. Features are causal (past observations
+only), so the extractor is conceptually deployable on a live forwarder.
+A Random Forest classifier is trained with a stratified 75/25
+train/test split on simulated windows.
+
+\FloatBarrier
+% ======================================================================
 \section{Experimental Setup}
 \label{sec:setup}
 
-\paragraph{Track A.}
-Traffic was generated in an isolated Docker bridge network with producer containers (HTTP, SSH, DNS) and scripted attackers. The held-out test set contains 14{,}219 sequences (814 benign, 13{,}405 attack) never used for training or model selection. Latency is measured over 2{,}000 CPU inferences (single-threaded Tier-1).
+\paragraph{Track A lab topology.}
+Traffic was generated in an isolated Docker bridge network with producer
+containers (HTTP, SSH, DNS) and scripted attackers. Fig.~\ref{fig:docker}
+conveys the physical capture layout used for Track~A: clients and
+attackers share a bridge with service producers so every PCAP is labelled
+by ground-truth scenario (benign baseline vs.\ one attack type). The
+held-out test set contains 14{,}219 sequences (814 benign, 13{,}405
+attack) never used for training or model selection. Latency is measured
+over 2{,}000 CPU inferences (single-threaded Tier-1).
 
-\paragraph{Track B.}
-A discrete-event NDN simulator emits 206{,}624 windows (43{,}299 BENIGN, 63{,}308 INTEREST\_FLOODING, 100{,}017 CACHE\_POLLUTION). Held-out evaluation uses 51{,}656 windows. Absolute numbers reflect simulator assumptions (Poisson arrivals, Zipf popularity, LRU CS, fixed PIT lifetime) and complement---not replace---Track~A.
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/docker_topology.pdf}
+  \caption{Track~A Docker lab topology. What it conveys: how labelled
+    IP PCAPs are produced (benign services + scripted attacks) before
+    feature extraction and cascade evaluation.}
+  \label{fig:docker}
+\end{figure}
 
-%----------------------------------------------------------------------
+Fig.~\ref{fig:classdist} conveys class imbalance on the Track~A held-out
+set. Attack classes dominate sample counts; benign is the minority class
+that false-positive rate cares about. This imbalance is why Tier-2 uses
+focal loss and elevated benign weight, and why E2E reporting separates
+attack detection from benign FPR.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/class_distribution.pdf}
+  \caption{Track~A held-out class distribution. What it conveys: attack
+    classes outnumber benign, so metrics must not hide benign false
+    alarms behind overall accuracy.}
+  \label{fig:classdist}
+\end{figure}
+
+\paragraph{Track B simulation.}
+A discrete-event NDN simulator emits 206{,}624 windows (43{,}299
+BENIGN, 63{,}308 INTEREST\_FLOODING, 100{,}017 CACHE\_POLLUTION).
+Held-out evaluation uses 51{,}656 windows. Absolute numbers reflect
+simulator assumptions (Poisson arrivals, Zipf popularity, LRU CS, fixed
+PIT lifetime) and complement---not replace---Track~A.
+
+\FloatBarrier
+% ======================================================================
 \section{Results}
 \label{sec:results}
 
-\subsection{Track A: per-tier and end-to-end}
-Table~\ref{tab:tier} lists per-component metrics. Tier-1 separates benign fast-path from attack escalation with zero benign false escalations on the test set. Tier-2 macro-F1 is 0.985; \texttt{BRUTE\_FORCE} has the lowest recall (0.914) due to early-packet overlap with slow HTTP. The full cascade detects all 13{,}405 attacks (100\%) and falsely flags 9 of 814 benign windows (1.11\% FPR); none are auto-blocked without review.
+\subsection{Track A: Per-Tier Discrimination}
+
+Table~\ref{tab:tier} lists per-component metrics. Tier-1 separates
+benign fast-path from attack escalation with zero benign false
+escalations on the test set. Tier-2 macro-F1 is 0.985;
+\texttt{BRUTE\_FORCE} has the lowest recall (0.914) due to early-packet
+overlap with slow HTTP / flood patterns.
 
 \begin{table}[!t]
-\caption{Track~A (R18) per-tier metrics on held-out test ($n{=}14{,}219$). Tier-2 uses macro averaging.}
-\label{tab:tier}
-\centering
-\small
-\begin{tabular}{lccccc}
-\toprule
-\textbf{Component} & \textbf{Acc.} & \textbf{Prec.} & \textbf{Rec.} & \textbf{F1} & \textbf{Latency} \\
-\midrule
-Tier-1 gate       & 1.000 & 1.000 & 1.000 & 1.000 & 3.66\,ms \\
-Tier-2 CNN-GRU    & 0.981 & 0.986 & 0.985 & 0.985 & 0.18\,ms \\
-Tier-3 anomaly    & 0.995 & 0.992 & 1.000 & 0.996 & 0.21\,ms \\
-Full cascade      & 0.999 & 0.999 & 1.000 & 1.000 & 4.19\,ms \\
-\bottomrule
-\end{tabular}
-\vspace{2pt}
-\parbox{\linewidth}{\footnotesize Throughput: Tier-1 272\,seq/s; Tier-2 ONNX 5{,}570\,seq/s; full cascade 238\,seq/s. Baseline gradient-boosting latency $\approx$13\,ms.}
+  \caption{Track~A (R18) per-tier metrics on held-out test
+    ($n = 14{,}219$). Tier-2 uses macro averaging.}
+  \label{tab:tier}
+  \centering\small
+  \begin{tabular}{lccccc}
+    \toprule
+    \textbf{Component} & \textbf{Acc.} & \textbf{Prec.} &
+    \textbf{Rec.} & \textbf{F1} & \textbf{Latency} \\
+    \midrule
+    Tier-1 gate    & 1.000 & 1.000 & 1.000 & 1.000 & 3.66\,ms \\
+    Tier-2 CNN-GRU & 0.981 & 0.986 & 0.985 & 0.985 & 0.18\,ms \\
+    Tier-3 anomaly & 0.995 & 0.992 & 1.000 & 0.996 & 0.21\,ms \\
+    Full cascade   & 0.999 & 0.999 & 1.000 & 1.000 & 4.19\,ms \\
+    \bottomrule
+  \end{tabular}
+
+  \parbox{\columnwidth}{\footnotesize
+    Throughput: Tier-1 272\,seq/s; Tier-2 ONNX 5{,}570\,seq/s; full
+    cascade 238\,seq/s. Baseline gradient-boosting latency
+    $\approx$13\,ms.}
 \end{table}
 
-Fig.~\ref{fig:metrics}--\ref{fig:heatmap} summarise Track~A discrimination; Fig.~\ref{fig:e2e}--\ref{fig:funnel} show security outcomes and cascade load; Fig.~\ref{fig:lat} reports latency/throughput.
+Fig.~\ref{fig:metrics} conveys whether each tier is individually
+competent. Bars for accuracy, precision, recall, and F1 stay near 1.0
+across Tier-1, Tier-2, Tier-3, and the full cascade, showing that the
+cascade does not trade security for speed---it composes strong
+components.
 
 \begin{figure}[!t]
-\centering
-\includegraphics[width=\columnwidth]{figures/tier_metrics_bars.pdf}
-\caption{Track~A accuracy, precision, recall, and F1 across tiers and end-to-end cascade.}
-\label{fig:metrics}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/tier_metrics_bars.pdf}
+  \caption{Track~A tier metric comparison. What it conveys: each stage
+    and the full cascade remain high on Acc/Prec/Rec/F1; the cascade is
+    not a weak link.}
+  \label{fig:metrics}
 \end{figure}
+
+Fig.~\ref{fig:t1cm} conveys the Tier-1 gate task in binary form: true
+benign windows should be allowed (fast path) and true attacks should be
+escalated. Perfect separation on the held-out set means Tier-1 does not
+leak attacks into silent \texttt{ALLOW}.
 
 \begin{figure}[!t]
-\centering
-\includegraphics[width=\columnwidth]{figures/confusion_matrix.pdf}
-\caption{Track~A Tier-2 normalised confusion matrix (single-column layout).}
-\label{fig:cm}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/tier1_confusion.pdf}
+  \caption{Tier-1 gate confusion (allow vs.\ escalate). What it conveys:
+    on the held-out set, benign windows are not falsely escalated and
+    attacks are not falsely allowed.}
+  \label{fig:t1cm}
 \end{figure}
+
+Fig.~\ref{fig:cm} conveys Tier-2 class confusion. The dark diagonal
+means near-perfect recall for five classes. The only material
+off-diagonal mass is
+\texttt{BRUTE\_FORCE}$\rightarrow$\texttt{DDOS\_HTTP} ($\approx$0.09):
+early packets of login-brute sequences can look flood-like, so a small
+fraction is typed as HTTP flood rather than brute force. This is a
+\emph{typing} error among attacks, not a miss of attack presence.
 
 \begin{figure}[!t]
-\centering
-\includegraphics[width=\columnwidth]{figures/per_class_heatmap.pdf}
-\caption{Track~A Tier-2 per-class precision, recall, and F1.}
-\label{fig:heatmap}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/confusion_matrix.pdf}
+  \caption{Tier-2 normalised confusion matrix. What it conveys: five
+    classes are nearly perfect; the residual error is
+    BRUTE\_FORCE$\leftrightarrow$DDOS\_HTTP overlap ($\approx$9\%).}
+  \label{fig:cm}
 \end{figure}
+
+Fig.~\ref{fig:heatmap} conveys the same Tier-2 story as per-class
+precision, recall, and F1 so the weak class is visible without reading
+matrix cells. \texttt{BRUTE\_FORCE} recall is the lowest bar; other
+classes sit at or near 1.0.
 
 \begin{figure}[!t]
-\centering
-\includegraphics[width=\columnwidth]{figures/e2e_security.pdf}
-\caption{Track~A end-to-end attack detection, benign FPR, precision, and F1.}
-\label{fig:e2e}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/per_class_heatmap.pdf}
+  \caption{Tier-2 per-class precision/recall/F1. What it conveys:
+    BRUTE\_FORCE is the weakest class; DNS tunnelling, port scan, and
+    slow HTTP are essentially saturated.}
+  \label{fig:heatmap}
 \end{figure}
+
+\subsection{Track A: Cascade Load, Security Outcome, and Latency}
+
+Fig.~\ref{fig:funnel} conveys \emph{where traffic goes} in the cascade.
+Only a minority of windows exit at Tier-1; most escalate to Tier-2; a
+smaller fraction reach Tier-3. That shape is intentional: the expensive
+models run only when suspicion rises.
 
 \begin{figure}[!t]
-\centering
-\includegraphics[width=\columnwidth]{figures/cascade_funnel.pdf}
-\caption{Track~A cascade funnel: percentage of sequences at each stage.}
-\label{fig:funnel}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/cascade_funnel.pdf}
+  \caption{Cascade funnel (\% of sequences per stage). What it conveys:
+    cheap-first behaviour---most suspicious mass reaches Tier-2; Tier-3
+    sees only residual uncertainty.}
+  \label{fig:funnel}
 \end{figure}
+
+Fig.~\ref{fig:e2e} conveys the operational security headline for
+Track~A: attack detection rate, benign false-positive rate, and
+end-to-end precision/F1. The full cascade flags or blocks all 13{,}405
+attacks (100\%) and falsely flags 9 of 814 benign windows (1.11\% FPR);
+none are auto-blocked without review.
 
 \begin{figure}[!t]
-\centering
-\includegraphics[width=\columnwidth]{figures/latency_throughput.pdf}
-\caption{Track~A inference latency and throughput (CPU, $n{=}2000$). Dashed line: 13\,ms gradient-boosting reference.}
-\label{fig:lat}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/e2e_security.pdf}
+  \caption{Track~A end-to-end security rates. What it conveys: 100\%
+    attack detection with 1.11\% benign FPR on the held-out set---the
+    production cascade metric that matters for SOC deployment.}
+  \label{fig:e2e}
 \end{figure}
 
-\subsection{Track B: NDN PoC}
-Table~\ref{tab:ndn} and Fig.~\ref{fig:ndn_cm}--\ref{fig:ndn_summary} report held-out NDN results. Interest Flooding is perfectly separable (PIT-exhaustion signature). Residual errors are a small BENIGN~$\leftrightarrow$~CACHE\_POLLUTION overlap during low-density attack warmup---expected under Zipf/LRU dynamics.
+Fig.~\ref{fig:t3roc} conveys Tier-3 ranking quality for novelty
+detection. An ROC curve near the top-left with AUC\,$=$\,1.0 on held-out
+scores means Mahalanobis distance separates benign embeddings from
+attack/novel windows under the lab distribution (with the usual caveat
+that lab AUC can be optimistic for open-world traffic).
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/tier3_roc.pdf}
+  \caption{Tier-3 Mahalanobis ROC. What it conveys: embedding novelty
+    scores rank attack/benign windows almost perfectly on the lab test
+    set (AUC\,$=$\,1.0).}
+  \label{fig:t3roc}
+\end{figure}
+
+Fig.~\ref{fig:lat} conveys edge feasibility. Mean and p99 latency for
+Tier-1, Tier-2 ONNX, Tier-3, and the full cascade are plotted against a
+13\,ms gradient-boosting reference; the lower panel shows throughput
+(seq/s). The full cascade averages 4.19\,ms---well below the baseline---
+while Tier-1 dominates runtime cost, confirming the gate is the
+throughput bottleneck and ONNX Tier-2 is cheap once escalated.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/latency_throughput.pdf}
+  \caption{Track~A latency and throughput (CPU, $n{=}2000$). What it
+    conveys: full cascade 4.19\,ms mean (p99 6.49\,ms) vs.\ 13\,ms
+    baseline; Tier-1 is the latency/throughput bottleneck.}
+  \label{fig:lat}
+\end{figure}
+
+\FloatBarrier
+\subsection{Track B: NDN PoC Discrimination}
+
+Table~\ref{tab:ndn} summarises held-out NDN metrics. Interest Flooding
+is perfectly separable (PIT-exhaustion signature). Residual errors are a
+small BENIGN~$\leftrightarrow$~CACHE\_POLLUTION overlap during
+low-density attack warmup---expected under Zipf/LRU dynamics.
 
 \begin{table}[!t]
-\caption{Track~B NDN PoC held-out metrics ($n{=}51{,}656$).}
-\label{tab:ndn}
-\centering
-\small
-\begin{tabular}{lcccc}
-\toprule
-\textbf{Class / Aggregate} & \textbf{Prec.} & \textbf{Rec.} & \textbf{F1} & \textbf{Acc.} \\
-\midrule
-BENIGN & 0.987 & 0.993 & 0.990 & 0.993 \\
-CACHE\_POLLUTION & 0.997 & 0.994 & 0.996 & 0.994 \\
-INTEREST\_FLOODING & 1.000 & 1.000 & 1.000 & 1.000 \\
-\midrule
-Overall & --- & --- & 0.995 & 0.996 \\
-\bottomrule
-\end{tabular}
-\vspace{2pt}
-\parbox{\linewidth}{\footnotesize Attack detection 99.65\%; benign FPR 0.67\%; ROC-AUC (attack vs.\ benign) 0.9997.}
+  \caption{Track~B NDN PoC held-out metrics ($n = 51{,}656$).}
+  \label{tab:ndn}
+  \centering\small
+  \begin{tabular}{lcccc}
+    \toprule
+    \textbf{Class / Aggregate} & \textbf{Prec.} & \textbf{Rec.} &
+    \textbf{F1} & \textbf{Acc.} \\
+    \midrule
+    BENIGN             & 0.987 & 0.993 & 0.990 & 0.993 \\
+    CACHE\_POLLUTION   & 0.997 & 0.994 & 0.996 & 0.994 \\
+    INTEREST\_FLOODING & 1.000 & 1.000 & 1.000 & 1.000 \\
+    \midrule
+    Overall            & ---   & ---   & 0.995 & 0.996 \\
+    \bottomrule
+  \end{tabular}
+
+  \parbox{\columnwidth}{\footnotesize
+    Attack detection 99.65\%; benign FPR 0.67\%;
+    ROC-AUC (attack vs.\ benign) 0.9997.}
 \end{table}
 
-\begin{figure}[!t]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig_ndn_confusion_matrix.pdf}
-\caption{Track~B normalised confusion matrix (counts in parentheses; single-column).}
-\label{fig:ndn_cm}
-\end{figure}
+Fig.~\ref{fig:ndn_cm} conveys class-wise NDN errors. Interest Flooding
+is a perfect diagonal (1.00 / 15{,}827). The only non-zero off-diagonal
+cells are BENIGN$\rightarrow$CACHE\_POLLUTION (73 windows, 0.01) and
+CACHE\_POLLUTION$\rightarrow$BENIGN (142 windows, 0.01). That pattern
+means the PoC almost never confuses flooding with pollution; the hard
+case is mild pollution warmup looking locally benign (and vice versa).
 
 \begin{figure}[!t]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig_ndn_per_class_metrics.pdf}
-\caption{Track~B per-class precision, recall, and F1.}
-\label{fig:ndn_metrics}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/fig_ndn_confusion_matrix.pdf}
+  \caption{NDN normalised confusion matrix. What it conveys: Interest
+    Flooding is perfectly classified; residual errors are a 1\% swap
+    between BENIGN and CACHE\_POLLUTION only.}
+  \label{fig:ndn_cm}
 \end{figure}
+
+Fig.~\ref{fig:ndn_metrics} conveys the same result as precision, recall,
+and F1 bars. All three classes sit near 1.0; Interest Flooding saturates
+every bar, matching the PIT-exhaustion signature being unambiguous.
 
 \begin{figure}[!t]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig_ndn_summary_metrics.pdf}
-\caption{Track~B summary metrics on held-out windows.}
-\label{fig:ndn_summary}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/fig_ndn_per_class_metrics.pdf}
+  \caption{NDN per-class precision/recall/F1. What it conveys: no weak
+    NDN class; Flooding is saturated; Pollution and Benign remain
+    $\ge$0.99 F1.}
+  \label{fig:ndn_metrics}
 \end{figure}
+
+Fig.~\ref{fig:ndn_acc} conveys per-class accuracy (row-correct rate). It
+is included so readers who prefer accuracy bars over P/R/F1 can confirm
+the same ranking: Flooding 1.0, Pollution $\approx$0.994, Benign
+$\approx$0.993.
 
 \begin{figure}[!t]
-\centering
-\includegraphics[width=\linewidth]{figures/fig_ndn_roc_curves.pdf}
-\caption{Track~B ROC: binary attack detection (left) and one-vs-rest (right).}
-\label{fig:ndn_roc}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/fig_ndn_per_class_accuracy.pdf}
+  \caption{NDN per-class accuracy. What it conveys: accuracy mirrors the
+    confusion-matrix diagonal---Flooding perfect, Pollution/Benign
+    slightly below due to warmup overlap.}
+  \label{fig:ndn_acc}
 \end{figure}
 
-%----------------------------------------------------------------------
+Fig.~\ref{fig:ndn_summary} conveys the four NDN headline rates in one
+chart: accuracy, macro-F1, attack detection, and benign FPR. Detection
+stays high while benign FPR stays at 0.67\%---the PoC analogue of
+Track~A's E2E security panel.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/fig_ndn_summary_metrics.pdf}
+  \caption{NDN summary metrics. What it conveys: 99.58\% accuracy,
+    0.995 macro-F1, 99.65\% attack detection, and 0.67\% benign FPR on
+    51{,}656 held-out windows.}
+  \label{fig:ndn_summary}
+\end{figure}
+
+Fig.~\ref{fig:ndn_roc} conveys ranking quality, not just hard decisions.
+The left panel is binary attack-vs-benign ROC (AUC\,$=$\,0.9997); the
+right panel is one-vs-rest ROC for each class (macro AUC\,$=$\,0.9998).
+Curves hugging the top-left corner mean score thresholds remain stable
+even when class priors differ.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/fig_ndn_roc_curves.pdf}
+  \caption{NDN ROC curves. What it conveys: near-perfect ranking for
+    attack detection (left) and per-class one-vs-rest scores (right);
+    thresholds are not brittle.}
+  \label{fig:ndn_roc}
+\end{figure}
+
+\FloatBarrier
+% ======================================================================
 \section{Discussion}
 \label{sec:discuss}
 
-Relative to Snort-like static rules, Hybrid-Sentinel learns behavioural windows and can FLAG novelty without waiting for a new signature. Track~A shows that cascading a cheap gate with calibrated deep classification and embedding anomaly detection meets edge latency budgets on CPU. Track~B shows the \emph{methodology} transfers when features are redefined for PIT/CS state.
+Relative to Snort-like static rules, Hybrid-Sentinel learns behavioural
+windows and can FLAG novelty without waiting for a new signature.
+Track~A shows that cascading a cheap gate with calibrated deep
+classification and embedding anomaly detection meets edge latency
+budgets on CPU (Figs.~\ref{fig:funnel}--\ref{fig:lat}). Track~B shows
+the \emph{methodology} transfers when features are redefined for PIT/CS
+state (Figs.~\ref{fig:ndn_topo}--\ref{fig:ndn_roc}).
 
 \paragraph{Limitations.}
-Track~B is a simulation, not a live NFD/ndnSIM capture. Track~A remains IP-overlay lab traffic; enterprise TLS and live NDN malware-in-Data remain future work. The paper deliberately separates the two tracks to avoid overclaiming that production cascade weights were trained on NDN packets.
+Track~B is a simulation, not a live NFD/ndnSIM capture. Track~A remains
+IP-overlay lab traffic; enterprise TLS and live NDN malware-in-Data
+remain future work. The paper deliberately separates the two tracks to
+avoid overclaiming that production cascade weights were trained on NDN
+packets.
 
-%----------------------------------------------------------------------
+% ======================================================================
 \section{Conclusion}
 \label{sec:concl}
 
-Hybrid-Sentinel delivers a reproducible, confidence-gated AI firewall: 100\% attack detection with 1.11\% benign FPR and 4.19\,ms cascade latency on IP lab traffic, plus an NDN PoC that detects Interest Flooding and Cache Pollution at 0.995 macro-F1. By pairing a Snort-motivated critique with dual-track evidence, we show that hybrid behavioural detection is a practical path toward NDN edge defense.
+Hybrid-Sentinel delivers a reproducible, confidence-gated AI firewall:
+100\% attack detection with 1.11\% benign FPR and 4.19\,ms cascade
+latency on IP lab traffic, plus an NDN PoC that detects Interest
+Flooding and Cache Pollution at 0.995 macro-F1. By pairing a
+Snort-motivated critique with dual-track evidence, we show that hybrid
+behavioural detection is a practical path toward NDN edge defense.
 
 \section*{Acknowledgment}
-The author thanks the TCL--IITM research collaboration for infrastructure and technical guidance.
+The author thanks the TCL--IITM research collaboration for
+infrastructure and technical guidance.
 
 \begin{thebibliography}{00}
 \bibitem{tcl-wiki}
 T.~Sood \textit{et al.},
-``Next-Generation Firewall Architectures: Rule-Based vs.\ AI Transformers,''
-TCL--IITM GitLab Wiki, 2026.
+``Next-Generation Firewall Architectures: Rule-Based vs.\ AI
+Transformers,'' TCL--IITM GitLab Wiki, 2026.
 
 \bibitem{ndn}
 L.~Zhang \textit{et al.},
@@ -262,13 +606,18 @@ L.~Zhang \textit{et al.},
 
 \bibitem{afiha}
 A.~Compagno \textit{et al.},
-``Poseidon: Mitigating Interest Flooding DDoS Attacks in Named Data Networking,''
-\emph{Proc.\ IEEE LCN}, 2013.
+``Poseidon: Mitigating Interest Flooding DDoS Attacks in Named Data
+Networking,'' \emph{Proc.\ IEEE LCN}, 2013.
+
+\bibitem{compagno}
+A.~Compagno \textit{et al.},
+``Botcache: Misusing Content Caching for Hidden Communication in
+Named-Data Networking,'' \emph{Proc.\ ACM SIGCOMM ANCS}, 2013.
 
 \bibitem{cicids}
 I.~Sharafaldin \textit{et al.},
-``Toward Generating a New Intrusion Detection Dataset and Intrusion Traffic Characterization,''
-\emph{Proc.\ ICISSp}, 2018.
+``Toward Generating a New Intrusion Detection Dataset and Intrusion
+Traffic Characterization,'' \emph{Proc.\ ICISSp}, 2018.
 \end{thebibliography}
 
 \end{document}
